@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
+	configv1 "github.com/openshift/api/config/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	//+kubebuilder:scaffold:imports
 )
@@ -51,6 +52,7 @@ func init() {
 
 	utilruntime.Must(nbv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(configv1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }

@@ -18,6 +18,8 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -40,6 +42,8 @@ type NotebookWebhook struct {
 	decoder     *admission.Decoder
 	OAuthConfig OAuthConfig
 }
+
+var proxyEnvVars = make(map[string]string, 4)
 
 // InjectReconciliationLock injects the kubefllow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
@@ -244,6 +248,14 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
+	// If cluster-wide-proxy is enabled add environment variables
+	if w.ClusterWideProxyIsEnabled() {
+		err = InjectProxyConfig(notebook)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+
 	// Create the mutated notebook object
 	marshaledNotebook, err := json.Marshal(notebook)
 	if err != nil {
@@ -253,8 +265,135 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledNotebook)
 }
 
+func (w *NotebookWebhook) ClusterWideProxyIsEnabled() bool {
+	proxyResourceList := &configv1.ProxyList{}
+	err := w.Client.List(context.TODO(), proxyResourceList)
+	if err != nil {
+		return false
+	}
+
+	for _, proxy := range proxyResourceList.Items {
+		if proxy.Name == "cluster" {
+			if proxy.Status.HTTPProxy != "" && proxy.Status.HTTPSProxy != "" &&
+				proxy.Status.NoProxy != "" {
+				// Update Proxy Env variables map
+				proxyEnvVars["HTTP_PROXY"] = proxy.Status.HTTPProxy
+				proxyEnvVars["HTTPS_PROXY"] = proxy.Status.HTTPSProxy
+				proxyEnvVars["NO_PROXY"] = proxy.Status.NoProxy
+				if proxy.Spec.TrustedCA.Name != "" {
+					proxyEnvVars["PIP_CERT"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+				}
+				return true
+			}
+		}
+	}
+	return false
+
+}
+
 // InjectDecoder injects the decoder.
 func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
 	w.decoder = d
 	return nil
+}
+
+func InjectProxyConfig(notebook *nbv1.Notebook) error {
+	notebookContainers := &notebook.Spec.Template.Spec.Containers
+	var imgContainer corev1.Container
+
+	// Add trusted-ca volume
+	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
+	certVolumeExists := false
+	certVolume := corev1.Volume{
+		Name: "trusted-ca",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: "trusted-ca",
+				},
+				Items: []corev1.KeyToPath{{
+					Key:  "ca-bundle.crt",
+					Path: "tls-ca-bundle.pem",
+				},
+				},
+			},
+		},
+	}
+	for index, volume := range *notebookVolumes {
+		if volume.Name == "trusted-ca" {
+			(*notebookVolumes)[index] = certVolume
+			certVolumeExists = true
+			break
+		}
+	}
+	if !certVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, certVolume)
+	}
+
+	// Update Notebook Image container with env variables and Volume Mounts
+	for _, container := range *notebookContainers {
+		// Update notebook image container with env Variables
+		if container.Name == notebook.Name {
+			var newVars []corev1.EnvVar
+			imgContainer = container
+
+			for key, val := range proxyEnvVars {
+				keyExists := false
+				for _, env := range imgContainer.Env {
+					if key == env.Name {
+						keyExists = true
+						// Update if Proxy spec is updated
+						if env.Value != val {
+							env.Value = val
+						}
+					}
+				}
+				if !keyExists {
+					newVars = append(newVars, corev1.EnvVar{Name: key, Value: val})
+				}
+			}
+
+			// Update container only when required env variables are not present
+			imgContainerExists := false
+			if len(newVars) != 0 {
+				imgContainer.Env = append(imgContainer.Env, newVars...)
+			}
+
+			// Create Volume mount
+			volumeMountExists := false
+			containerVolMounts := &imgContainer.VolumeMounts
+			trustedCAVolMount := corev1.VolumeMount{
+				Name:      "trusted-ca",
+				ReadOnly:  true,
+				MountPath: "/etc/pki/ca-trust/extracted/pem",
+			}
+
+			for index, volumeMount := range *containerVolMounts {
+				if volumeMount.Name == "trusted-ca" {
+					(*containerVolMounts)[index] = trustedCAVolMount
+					volumeMountExists = true
+					break
+				}
+			}
+			if !volumeMountExists {
+				*containerVolMounts = append(*containerVolMounts, trustedCAVolMount)
+			}
+
+			// Update container with Env and Volume Mount Changes
+			for index, container := range *notebookContainers {
+				if container.Name == notebook.Name {
+					(*notebookContainers)[index] = imgContainer
+					imgContainerExists = true
+					break
+				}
+			}
+
+			if !imgContainerExists {
+				return fmt.Errorf("notebook image container not found %v", notebook.Name)
+			}
+			break
+		}
+	}
+	return nil
+
 }

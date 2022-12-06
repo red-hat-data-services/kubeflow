@@ -136,6 +136,12 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
+	// Create Configmap
+	err = r.createProxyConfigMap(notebook, ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Create the objects required by the OAuth proxy sidecar (see
 	// notebook_oauth.go file)
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
@@ -180,6 +186,26 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *OpenshiftNotebookReconciler) createProxyConfigMap(notebook *nbv1.Notebook,
+	ctx context.Context) error {
+
+	trustedCAConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "trusted-ca",
+			Namespace: notebook.Namespace,
+			Labels:    map[string]string{"config.openshift.io/inject-trusted-cabundle": "true"},
+		},
+	}
+
+	err := r.Client.Create(ctx, trustedCAConfigMap)
+	if err != nil {
+		if apierrs.IsAlreadyExists(err) {
+			return nil
+		}
+	}
+	return err
 }
 
 // SetupWithManager sets up the controller with the Manager.
