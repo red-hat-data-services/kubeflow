@@ -22,3 +22,12 @@ patchesStrategicMerge:
   - remove_namespace_patch.yaml
   - manager_openshift_patch.yaml
   - manager_service_openshift_patch.yaml
+
+vars:
+- name: odh-kf-notebook-controller-image
+  objref:
+    kind: ConfigMap
+    name: notebook-controller-image-parameters
+    apiVersion: v1
+  fieldref:
+    fieldpath: data.odh-kf-notebook-controller-image
