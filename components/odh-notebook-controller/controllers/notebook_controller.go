@@ -18,10 +18,11 @@ package controllers
 import (
 	"context"
 	"errors"
-	netv1 "k8s.io/api/networking/v1"
 	"reflect"
 	"strconv"
 	"time"
+
+	netv1 "k8s.io/api/networking/v1"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -139,12 +140,6 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// Create Configmap
-	err = r.createProxyConfigMap(notebook, ctx)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	// Call the Network Policies reconciler
 	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
 	if err != nil {
@@ -195,39 +190,6 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func (r *OpenshiftNotebookReconciler) createProxyConfigMap(notebook *nbv1.Notebook,
-	ctx context.Context) error {
-
-	desiredTrustedCAConfigMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "trusted-ca",
-			Namespace: notebook.Namespace,
-			Labels:    map[string]string{"config.openshift.io/inject-trusted-cabundle": "true"},
-		},
-	}
-
-	foundTrustedCAConfigMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKey{
-		Namespace: desiredTrustedCAConfigMap.Namespace,
-		Name:      desiredTrustedCAConfigMap.Name,
-	}, foundTrustedCAConfigMap)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			r.Log.Info("Creating trusted-ca configmap")
-			err = r.Create(ctx, desiredTrustedCAConfigMap)
-			if err != nil && !apierrs.IsAlreadyExists(err) {
-				r.Log.Error(err, "Unable to create the trusted-ca ConfigMap")
-				return err
-			}
-		} else {
-			r.Log.Error(err, "Unable to fetch the trusted-ca ConfigMap")
-			return err
-		}
-	}
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

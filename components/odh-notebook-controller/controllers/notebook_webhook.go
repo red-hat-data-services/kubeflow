@@ -17,12 +17,13 @@ package controllers
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 
-	configv1 "github.com/openshift/api/config/v1"
-
+	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -39,14 +40,13 @@ import (
 
 // NotebookWebhook holds the webhook configuration.
 type NotebookWebhook struct {
+	Log         logr.Logger
 	Client      client.Client
 	Decoder     *admission.Decoder
 	OAuthConfig OAuthConfig
 }
 
-var proxyEnvVars = make(map[string]string, 4)
-
-// InjectReconciliationLock injects the kubefllow notebook controller culling
+// InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
 // controller finishes the reconciliation. Otherwise a race condition may happen
 // while mounting the notebook service account pull secret into the pod.
@@ -225,6 +225,10 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 
 // Handle transforms the Notebook objects.
 func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) admission.Response {
+
+	// Initialize logger format
+	log := w.Log.WithValues("notebook", req.Name, "namespace", req.Namespace)
+
 	notebook := &nbv1.Notebook{}
 
 	err := w.Decoder.Decode(req, notebook)
@@ -238,19 +242,16 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-	}
-
-	// Inject the OAuth proxy if the annotation is present
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		err = InjectOAuthProxy(notebook, w.OAuthConfig)
+		log.Info("Checking and mounting CA certificate bundle")
+		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 	}
 
-	// If cluster-wide-proxy is enabled add environment variables
-	if w.ClusterWideProxyIsEnabled() {
-		err = InjectProxyConfig(notebook)
+	// Inject the OAuth proxy if the annotation is present
+	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -265,137 +266,118 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledNotebook)
 }
 
-func (w *NotebookWebhook) ClusterWideProxyIsEnabled() bool {
-	proxyResourceList := &configv1.ProxyList{}
-	err := w.Client.List(context.TODO(), proxyResourceList)
-	if err != nil {
-		return false
-	}
-
-	for _, proxy := range proxyResourceList.Items {
-		if proxy.Name == "cluster" {
-			if proxy.Status.HTTPProxy != "" && proxy.Status.HTTPSProxy != "" &&
-				proxy.Status.NoProxy != "" {
-				// Update Proxy Env variables map
-				proxyEnvVars["HTTP_PROXY"] = proxy.Status.HTTPProxy
-				proxyEnvVars["HTTPS_PROXY"] = proxy.Status.HTTPSProxy
-				proxyEnvVars["NO_PROXY"] = proxy.Status.NoProxy
-				if proxy.Spec.TrustedCA.Name != "" {
-					proxyEnvVars["PIP_CERT"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-					proxyEnvVars["REQUESTS_CA_BUNDLE"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-					proxyEnvVars["SSL_CERT_FILE"] = "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
-				}
-				return true
-			}
-		}
-	}
-	return false
-
-}
-
 // InjectDecoder injects the decoder.
 func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
 	w.Decoder = d
 	return nil
 }
 
-func InjectProxyConfig(notebook *nbv1.Notebook) error {
-	notebookContainers := &notebook.Spec.Template.Spec.Containers
-	var imgContainer corev1.Container
+// CheckAndMountCACertBundle checks if the odh-trusted-ca-bundle ConfigMap is present
+func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
-	// Add trusted-ca volume
-	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
-	certVolumeExists := false
-	certVolume := corev1.Volume{
-		Name: "trusted-ca",
-		VolumeSource: corev1.VolumeSource{
-			ConfigMap: &corev1.ConfigMapVolumeSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: "trusted-ca",
+	// Define the name of the ConfigMap to be mounted
+	configMapName := "odh-trusted-ca-bundle"
+
+	// get configmap based on its name and the namespace
+	configMap := &corev1.ConfigMap{}
+	if err := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
+		log.Error(err, "Unable to fetch ConfigMap", "configMap", configMapName)
+	}
+
+	// Search for the odh-trusted-ca-bundle ConfigMap
+	log.Info("ConfigMap found on the given Namespace")
+	cm := configMap
+	if cm.Name == configMapName {
+
+		volumeName := "trusted-ca"
+		caVolumeMountPath := "/etc/pki/tls/certs/custom-ca-bundle.crt"
+		odhVolumeMountPath := "/etc/pki/tls/certs/custom-odh-ca-bundle.crt"
+		// Define volume mounts for both certificates
+		volumeMounts := []corev1.VolumeMount{}
+
+		if err := certValidator(cm, "ca-bundle.crt", log); err == nil {
+			log.Info("Validating certificates for ca-bundle.crt")
+			customCAVolumeMounts := []corev1.VolumeMount{
+				{
+					Name:      volumeName,
+					MountPath: caVolumeMountPath,
+					SubPath:   "custom-ca-bundle.crt",
+					ReadOnly:  true,
 				},
-				Items: []corev1.KeyToPath{{
-					Key:  "ca-bundle.crt",
-					Path: "tls-ca-bundle.pem",
+			}
+			volumeMounts = append(volumeMounts, customCAVolumeMounts...)
+		} else {
+			log.Error(err, "Error validating certificates for ca-bundle.crt")
+		}
+
+		if err := certValidator(cm, "odh-ca-bundle.crt", log); err == nil {
+			log.Info("Validating certificates for odh-ca-bundle.crt")
+			customODHCAVolumeMounts := []corev1.VolumeMount{
+				{
+					Name:      volumeName,
+					MountPath: odhVolumeMountPath,
+					SubPath:   "custom-odh-ca-bundle.crt",
+					ReadOnly:  true,
 				},
+			}
+			volumeMounts = append(volumeMounts, customODHCAVolumeMounts...)
+		} else {
+			log.Error(err, "Error validating certificates for odh-ca-bundle.crt")
+		}
+
+		// Add volume mount to the pod's spec
+		notebook.Spec.Template.Spec.Containers[0].VolumeMounts = append(notebook.Spec.Template.Spec.Containers[0].VolumeMounts, volumeMounts...)
+
+		// Create volume for mounting the CA certificate from the ConfigMap with key and path
+		configMapVolume := corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: cm.Name},
+					Optional:             pointer.Bool(true),
+					Items: []corev1.KeyToPath{
+						{
+							Key:  "ca-bundle.crt",
+							Path: "custom-ca-bundle.crt",
+						},
+						{
+							Key:  "odh-ca-bundle.crt",
+							Path: "custom-odh-ca-bundle.crt",
+						},
+					},
 				},
 			},
-		},
-	}
-	for index, volume := range *notebookVolumes {
-		if volume.Name == "trusted-ca" {
-			(*notebookVolumes)[index] = certVolume
-			certVolumeExists = true
-			break
 		}
+
+		// Add volume to the pod's spec
+		notebook.Spec.Template.Spec.Volumes = append(notebook.Spec.Template.Spec.Volumes, configMapVolume)
+		return nil
 	}
-	if !certVolumeExists {
-		*notebookVolumes = append(*notebookVolumes, certVolume)
-	}
 
-	// Update Notebook Image container with env variables and Volume Mounts
-	for _, container := range *notebookContainers {
-		// Update notebook image container with env Variables
-		if container.Name == notebook.Name {
-			var newVars []corev1.EnvVar
-			imgContainer = container
-
-			for key, val := range proxyEnvVars {
-				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
-						keyExists = true
-						// Update if Proxy spec is updated
-						if env.Value != val {
-							env.Value = val
-						}
-					}
-				}
-				if !keyExists {
-					newVars = append(newVars, corev1.EnvVar{Name: key, Value: val})
-				}
-			}
-
-			// Update container only when required env variables are not present
-			imgContainerExists := false
-			if len(newVars) != 0 {
-				imgContainer.Env = append(imgContainer.Env, newVars...)
-			}
-
-			// Create Volume mount
-			volumeMountExists := false
-			containerVolMounts := &imgContainer.VolumeMounts
-			trustedCAVolMount := corev1.VolumeMount{
-				Name:      "trusted-ca",
-				ReadOnly:  true,
-				MountPath: "/etc/pki/ca-trust/extracted/pem",
-			}
-
-			for index, volumeMount := range *containerVolMounts {
-				if volumeMount.Name == "trusted-ca" {
-					(*containerVolMounts)[index] = trustedCAVolMount
-					volumeMountExists = true
-					break
-				}
-			}
-			if !volumeMountExists {
-				*containerVolMounts = append(*containerVolMounts, trustedCAVolMount)
-			}
-
-			// Update container with Env and Volume Mount Changes
-			for index, container := range *notebookContainers {
-				if container.Name == notebook.Name {
-					(*notebookContainers)[index] = imgContainer
-					imgContainerExists = true
-					break
-				}
-			}
-
-			if !imgContainerExists {
-				return fmt.Errorf("notebook image container not found %v", notebook.Name)
-			}
-			break
-		}
-	}
+	// If specified ConfigMap not found
+	log.Error(nil, "ConfigMap not found", "configMap", configMapName)
 	return nil
+}
 
+func certValidator(cm *corev1.ConfigMap, dataKey string, log logr.Logger) error {
+
+	odhCertData, ok := cm.Data[dataKey]
+	if !ok || odhCertData == "" {
+		// Print a warning if odh-ca-bundle.crt data is empty
+		return fmt.Errorf("Warning: %s data is empty", dataKey)
+	}
+
+	// Attempt to decode PEM encoded certificate
+	odhBlock, _ := pem.Decode([]byte(odhCertData))
+	if odhBlock != nil && odhBlock.Type == "CERTIFICATE" {
+		// Attempt to parse the certificate
+		_, err := x509.ParseCertificate(odhBlock.Bytes)
+		if err != nil {
+			return fmt.Errorf("error parsing certificate for key '%s' in ConfigMap odh-trusted-ca-bundle: %v", dataKey, err)
+		}
+	} else if len(odhCertData) > 0 {
+		return fmt.Errorf("invalid certificate format for key '%s' in ConfigMap odh-trusted-ca-bundle", dataKey)
+	}
+
+	return nil
 }
