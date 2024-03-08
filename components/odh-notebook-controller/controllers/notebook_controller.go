@@ -16,7 +16,10 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"reflect"
 	"strconv"
@@ -140,6 +143,16 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
+	// Create Configmap with the ODH notebook certificate
+	// With the ODH 2.8 Operator, user can provide their own certificate
+	// from DSCI initializer, that provides the certs in a ConfigMap odh-trusted-ca-bundle
+	// create a separate ConfigMap for the notebook which append the user provided certs
+	// with cluster self-signed certs.
+	err = r.createNotebookCertConfigMap(notebook, ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Call the Network Policies reconciler
 	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
 	if err != nil {
@@ -190,6 +203,99 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *OpenshiftNotebookReconciler) createNotebookCertConfigMap(notebook *nbv1.Notebook,
+	ctx context.Context) error {
+
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	rootCertPool := [][]byte{}                    // Root certificate pool
+	odhConfigMapName := "odh-trusted-ca-bundle"   // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
+	selfSignedConfigMapName := "kube-root-ca.crt" // Self-Signed Certs Contains ca.crt
+
+	configMapFileNames := map[string][]string{
+		odhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
+		selfSignedConfigMapName: {"ca.crt"},
+	}
+
+	for configMapName, certFileNames := range configMapFileNames {
+
+		configMap := &corev1.ConfigMap{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
+			// if configmap odh-trusted-ca-bundle is not found,
+			// no need to create the workbench-trusted-ca-bundle
+			if apierrs.IsNotFound(err) && configMapName == odhConfigMapName {
+				return nil
+			}
+			log.Info("Unable to fetch ConfigMap", "configMap", configMapName)
+			continue
+		}
+
+		// Search for the certificate in the ConfigMap
+		for _, certFile := range certFileNames {
+
+			certData, ok := configMap.Data[certFile]
+			if !ok || certData == "" {
+				continue
+			}
+
+			// Attempt to decode PEM encoded certificate
+			block, _ := pem.Decode([]byte(certData))
+			if block != nil && block.Type == "CERTIFICATE" {
+				// Attempt to parse the certificate
+				_, err := x509.ParseCertificate(block.Bytes)
+				if err != nil {
+					log.Error(err, "Error parsing certificate", "configMap", configMap.Name, "certFile", certFile)
+					continue
+				}
+				// Add the certificate to the pool
+				rootCertPool = append(rootCertPool, []byte(certData))
+			} else if len(certData) > 0 {
+				log.Info("Invalid certificate format", "configMap", configMap.Name, "certFile", certFile)
+			}
+		}
+	}
+
+	if len(rootCertPool) > 0 {
+		desiredTrustedCAConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workbench-trusted-ca-bundle",
+				Namespace: notebook.Namespace,
+				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": string(bytes.Join(rootCertPool, []byte{})),
+			},
+		}
+
+		foundTrustedCAConfigMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, client.ObjectKey{
+			Namespace: desiredTrustedCAConfigMap.Namespace,
+			Name:      desiredTrustedCAConfigMap.Name,
+		}, foundTrustedCAConfigMap)
+		if err != nil {
+			if apierrs.IsNotFound(err) {
+				r.Log.Info("Creating workbench-trusted-ca-bundle configmap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+				err = r.Create(ctx, desiredTrustedCAConfigMap)
+				if err != nil && !apierrs.IsAlreadyExists(err) {
+					r.Log.Error(err, "Unable to create the workbench-trusted-ca-bundle ConfigMap")
+					return err
+				} else if apierrs.IsAlreadyExists(err) {
+					// if the configmap already exists, update it
+					err = r.Update(ctx, desiredTrustedCAConfigMap)
+					if err != nil {
+						r.Log.Info("Unable to update the workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+						return nil
+					} else {
+						r.Log.Info("Updated workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
