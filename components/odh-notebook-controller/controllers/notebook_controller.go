@@ -40,6 +40,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -205,6 +207,11 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, nil
 }
 
+// createNotebookCertConfigMap creates a ConfigMap workbench-trusted-ca-bundle
+// that contains the root certificates from the ConfigMap odh-trusted-ca-bundle
+// and the self-signed certificates from the ConfigMap kube-root-ca.crt
+// The ConfigMap workbench-trusted-ca-bundle is used by the notebook to trust
+// the root and self-signed certificates.
 func (r *OpenshiftNotebookReconciler) createNotebookCertConfigMap(notebook *nbv1.Notebook,
 	ctx context.Context) error {
 
@@ -215,12 +222,13 @@ func (r *OpenshiftNotebookReconciler) createNotebookCertConfigMap(notebook *nbv1
 	odhConfigMapName := "odh-trusted-ca-bundle"   // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
 	selfSignedConfigMapName := "kube-root-ca.crt" // Self-Signed Certs Contains ca.crt
 
+	configMapList := []string{odhConfigMapName, selfSignedConfigMapName}
 	configMapFileNames := map[string][]string{
 		odhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
 		selfSignedConfigMapName: {"ca.crt"},
 	}
 
-	for configMapName, certFileNames := range configMapFileNames {
+	for _, configMapName := range configMapList {
 
 		configMap := &corev1.ConfigMap{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
@@ -234,9 +242,15 @@ func (r *OpenshiftNotebookReconciler) createNotebookCertConfigMap(notebook *nbv1
 		}
 
 		// Search for the certificate in the ConfigMap
-		for _, certFile := range certFileNames {
+		for _, certFile := range configMapFileNames[configMapName] {
 
 			certData, ok := configMap.Data[certFile]
+			// If ca-bundle.crt is not found in the ConfigMap odh-trusted-ca-bundle
+			// no need to create the workbench-trusted-ca-bundle, as it is created
+			// by annotation inject-ca-bundle: "true"
+			if !ok || certFile == "ca-bundle.crt" && certData == "" {
+				return nil
+			}
 			if !ok || certData == "" {
 				continue
 			}
@@ -282,16 +296,18 @@ func (r *OpenshiftNotebookReconciler) createNotebookCertConfigMap(notebook *nbv1
 				if err != nil && !apierrs.IsAlreadyExists(err) {
 					r.Log.Error(err, "Unable to create the workbench-trusted-ca-bundle ConfigMap")
 					return err
-				} else if apierrs.IsAlreadyExists(err) {
-					// if the configmap already exists, update it
-					err = r.Update(ctx, desiredTrustedCAConfigMap)
-					if err != nil {
-						r.Log.Info("Unable to update the workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
-						return nil
-					} else {
-						r.Log.Info("Updated workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
-					}
+				} else {
+					r.Log.Info("Created workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
 				}
+			}
+		} else if err == nil && !reflect.DeepEqual(foundTrustedCAConfigMap.Data, desiredTrustedCAConfigMap.Data) {
+			// some data has changed, update the ConfigMap
+			r.Log.Info("Updating workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+			foundTrustedCAConfigMap.Data = desiredTrustedCAConfigMap.Data
+			err = r.Update(ctx, foundTrustedCAConfigMap)
+			if err != nil {
+				r.Log.Error(err, "Unable to update the workbench-trusted-ca-bundle ConfigMap")
+				return err
 			}
 		}
 	}
@@ -306,8 +322,43 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
-		Owns(&netv1.NetworkPolicy{})
+		Owns(&netv1.NetworkPolicy{}).
 
+		// Watch for all the required ConfigMaps
+		// odh-trusted-ca-bundle, kube-root-ca.crt, workbench-trusted-ca-bundle
+		// and reconcile the workbench-trusted-ca-bundle ConfigMap,
+		Watches(&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				log := r.Log.WithValues("namespace", o.GetNamespace())
+
+				if o.GetName() == "odh-trusted-ca-bundle" || o.GetName() == "kube-root-ca.crt" || o.GetName() == "workbench-trusted-ca-bundle" {
+					log.V(1).Info("Reconcile event triggered by change in event on Global CA Bundle: %s", o.GetName())
+
+					// List all the notebooks in the namespace and trigger a reconcile event
+					var nbList nbv1.NotebookList
+					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+						log.Error(err, "unable to list Notebook's when attempting to handle Global CA Bundle event.")
+						return []reconcile.Request{}
+					}
+
+					// As there only one configmap workbench-trusted-ca-bundle per namespace
+					// and is used by all the notebooks in the namespace, we can trigger
+					// reconcile event only for the first notebook in the list.
+					for _, nb := range nbList.Items {
+						return []reconcile.Request{
+							{
+								NamespacedName: types.NamespacedName{
+									Name:      nb.Name,
+									Namespace: o.GetNamespace(),
+								},
+							},
+						}
+					}
+				}
+
+				return []reconcile.Request{}
+			}),
+		)
 	err := builder.Complete(r)
 	if err != nil {
 		return err
