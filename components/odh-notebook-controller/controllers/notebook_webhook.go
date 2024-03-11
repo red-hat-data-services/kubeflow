@@ -363,7 +363,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 				for _, env := range imgContainer.Env {
 					if key == env.Name {
 						keyExists = true
-						// Update if spec is updated
+						// Update if env value is updated
 						if env.Value != val {
 							env.Value = val
 						}
