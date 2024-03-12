@@ -280,7 +280,8 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 	// get configmap based on its name and the namespace
 	configMap := &corev1.ConfigMap{}
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
-		log.Error(err, "Unable to fetch ConfigMap", "configMap", configMapName)
+		log.Info("Unable to fetch ConfigMap", "configMap", configMapName)
+		return nil
 	}
 
 	// Search for the odh-trusted-ca-bundle ConfigMap
