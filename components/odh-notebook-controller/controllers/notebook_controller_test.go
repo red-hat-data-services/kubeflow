@@ -213,11 +213,11 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 
 			// Assert that the volume mount and volume are added correctly
-			volumeMountPath := "/etc/pki/tls/certs/custom-ca-bundle.crt"
+			volumeMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
 			expectedVolumeMount := corev1.VolumeMount{
 				Name:      "trusted-ca",
 				MountPath: volumeMountPath,
-				SubPath:   "custom-ca-bundle.crt",
+				SubPath:   "ca-bundle.crt",
 				ReadOnly:  true,
 			}
 			if len(notebook.Spec.Template.Spec.Containers[0].VolumeMounts) == 0 {
@@ -237,11 +237,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 						Items: []corev1.KeyToPath{
 							{
 								Key:  "ca-bundle.crt",
-								Path: "custom-ca-bundle.crt",
-							},
-							{
-								Key:  "odh-ca-bundle.crt",
-								Path: "custom-odh-ca-bundle.crt",
+								Path: "ca-bundle.crt",
 							},
 						},
 					},

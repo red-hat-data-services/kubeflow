@@ -16,7 +16,10 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"reflect"
 	"strconv"
@@ -37,6 +40,8 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -140,6 +145,27 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
+	// Create Configmap with the ODH notebook certificate
+	// With the ODH 2.8 Operator, user can provide their own certificate
+	// from DSCI initializer, that provides the certs in a ConfigMap odh-trusted-ca-bundle
+	// create a separate ConfigMap for the notebook which append the user provided certs
+	// with cluster self-signed certs.
+	err = r.CreateNotebookCertConfigMap(notebook, ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	} else {
+		// If createNotebookCertConfigMap returns nil,
+		// and still the ConfigMap workbench-trusted-ca-bundle is not found,
+		// reconcile notebook to unset the env variable.
+		if r.IsConfigMapDeleted(notebook, ctx) {
+			// Unset the env variable in the notebook
+			err = r.UnsetNotebookCertConfig(notebook, ctx)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	// Call the Network Policies reconciler
 	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
 	if err != nil {
@@ -192,6 +218,211 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, nil
 }
 
+// createNotebookCertConfigMap creates a ConfigMap workbench-trusted-ca-bundle
+// that contains the root certificates from the ConfigMap odh-trusted-ca-bundle
+// and the self-signed certificates from the ConfigMap kube-root-ca.crt
+// The ConfigMap workbench-trusted-ca-bundle is used by the notebook to trust
+// the root and self-signed certificates.
+func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1.Notebook,
+	ctx context.Context) error {
+
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	rootCertPool := [][]byte{}                    // Root certificate pool
+	odhConfigMapName := "odh-trusted-ca-bundle"   // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
+	selfSignedConfigMapName := "kube-root-ca.crt" // Self-Signed Certs Contains ca.crt
+
+	configMapList := []string{odhConfigMapName, selfSignedConfigMapName}
+	configMapFileNames := map[string][]string{
+		odhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
+		selfSignedConfigMapName: {"ca.crt"},
+	}
+
+	for _, configMapName := range configMapList {
+
+		configMap := &corev1.ConfigMap{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
+			// if configmap odh-trusted-ca-bundle is not found,
+			// no need to create the workbench-trusted-ca-bundle
+			if apierrs.IsNotFound(err) && configMapName == odhConfigMapName {
+				return nil
+			}
+			log.Info("Unable to fetch ConfigMap", "configMap", configMapName)
+			continue
+		}
+
+		// Search for the certificate in the ConfigMap
+		for _, certFile := range configMapFileNames[configMapName] {
+
+			certData, ok := configMap.Data[certFile]
+			// If ca-bundle.crt is not found in the ConfigMap odh-trusted-ca-bundle
+			// no need to create the workbench-trusted-ca-bundle, as it is created
+			// by annotation inject-ca-bundle: "true"
+			if !ok || certFile == "ca-bundle.crt" && certData == "" {
+				return nil
+			}
+			if !ok || certData == "" {
+				continue
+			}
+
+			// Attempt to decode PEM encoded certificate
+			block, _ := pem.Decode([]byte(certData))
+			if block != nil && block.Type == "CERTIFICATE" {
+				// Attempt to parse the certificate
+				_, err := x509.ParseCertificate(block.Bytes)
+				if err != nil {
+					log.Error(err, "Error parsing certificate", "configMap", configMap.Name, "certFile", certFile)
+					continue
+				}
+				// Add the certificate to the pool
+				rootCertPool = append(rootCertPool, []byte(certData))
+			} else if len(certData) > 0 {
+				log.Info("Invalid certificate format", "configMap", configMap.Name, "certFile", certFile)
+			}
+		}
+	}
+
+	if len(rootCertPool) > 0 {
+		desiredTrustedCAConfigMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "workbench-trusted-ca-bundle",
+				Namespace: notebook.Namespace,
+				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": string(bytes.Join(rootCertPool, []byte{})),
+			},
+		}
+
+		foundTrustedCAConfigMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, client.ObjectKey{
+			Namespace: desiredTrustedCAConfigMap.Namespace,
+			Name:      desiredTrustedCAConfigMap.Name,
+		}, foundTrustedCAConfigMap)
+		if err != nil {
+			if apierrs.IsNotFound(err) {
+				r.Log.Info("Creating workbench-trusted-ca-bundle configmap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+				err = r.Create(ctx, desiredTrustedCAConfigMap)
+				if err != nil && !apierrs.IsAlreadyExists(err) {
+					r.Log.Error(err, "Unable to create the workbench-trusted-ca-bundle ConfigMap")
+					return err
+				} else {
+					r.Log.Info("Created workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+				}
+			}
+		} else if err == nil && !reflect.DeepEqual(foundTrustedCAConfigMap.Data, desiredTrustedCAConfigMap.Data) {
+			// some data has changed, update the ConfigMap
+			r.Log.Info("Updating workbench-trusted-ca-bundle ConfigMap", "namespace", notebook.Namespace, "notebook", notebook.Name)
+			foundTrustedCAConfigMap.Data = desiredTrustedCAConfigMap.Data
+			err = r.Update(ctx, foundTrustedCAConfigMap)
+			if err != nil {
+				r.Log.Error(err, "Unable to update the workbench-trusted-ca-bundle ConfigMap")
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// IsConfigMapDeleted check if configmap is deleted
+// and the notebook is using the configmap as a volume
+func (r *OpenshiftNotebookReconciler) IsConfigMapDeleted(notebook *nbv1.Notebook, ctx context.Context) bool {
+
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	var workbenchConfigMapExists bool
+	workbenchConfigMapExists = false
+
+	foundTrustedCAConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, client.ObjectKey{
+		Namespace: notebook.Namespace,
+		Name:      "workbench-trusted-ca-bundle",
+	}, foundTrustedCAConfigMap)
+	if err == nil {
+		workbenchConfigMapExists = true
+	}
+
+	if !workbenchConfigMapExists {
+		for _, volume := range notebook.Spec.Template.Spec.Volumes {
+			if volume.ConfigMap != nil && volume.ConfigMap.Name == "workbench-trusted-ca-bundle" {
+				log.Info("workbench-trusted-ca-bundle ConfigMap is deleted and used by the notebook as a volume")
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// UnsetEnvVars removes the environment variables from the notebook container
+func (r *OpenshiftNotebookReconciler) UnsetNotebookCertConfig(notebook *nbv1.Notebook, ctx context.Context) error {
+
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	// Get the notebook object
+	envVars := []string{"PIP_CERT", "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "PIPELINES_SSL_SA_CERTS"}
+	notebookSpecChanged := false
+	patch := client.MergeFrom(notebook.DeepCopy())
+	copyNotebook := notebook.DeepCopy()
+
+	notebookContainers := &copyNotebook.Spec.Template.Spec.Containers
+	notebookVolumes := &copyNotebook.Spec.Template.Spec.Volumes
+	var imgContainer corev1.Container
+
+	// Unset the env variables in the notebook
+	for _, container := range *notebookContainers {
+		// Update notebook image container with env Variables
+		if container.Name == notebook.Name {
+			imgContainer = container
+			for _, key := range envVars {
+				for index, env := range imgContainer.Env {
+					if key == env.Name {
+						imgContainer.Env = append(imgContainer.Env[:index], imgContainer.Env[index+1:]...)
+					}
+				}
+			}
+			// Unset VolumeMounts in the notebook
+			for index, volumeMount := range imgContainer.VolumeMounts {
+				if volumeMount.Name == "trusted-ca" {
+					imgContainer.VolumeMounts = append(imgContainer.VolumeMounts[:index], imgContainer.VolumeMounts[index+1:]...)
+				}
+			}
+			// Update container with Env and Volume Mount Changes
+			for index, container := range *notebookContainers {
+				if container.Name == notebook.Name {
+					(*notebookContainers)[index] = imgContainer
+					notebookSpecChanged = true
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Unset Volume in the notebook
+	for index, volume := range *notebookVolumes {
+		if volume.ConfigMap != nil && volume.ConfigMap.Name == "workbench-trusted-ca-bundle" {
+			*notebookVolumes = append((*notebookVolumes)[:index], (*notebookVolumes)[index+1:]...)
+			notebookSpecChanged = true
+			break
+		}
+	}
+
+	if notebookSpecChanged {
+		// Update the notebook with the new container
+		err := r.Patch(ctx, copyNotebook, patch)
+		if err != nil {
+			log.Error(err, "Unable to update the notebook for removing the env variables")
+			return err
+		}
+		log.Info("Removed the env variables from the notebook", "notebook", notebook.Name, "namespace", notebook.Namespace)
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
@@ -200,8 +431,70 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
-		Owns(&netv1.NetworkPolicy{})
+		Owns(&netv1.NetworkPolicy{}).
 
+		// Watch for all the required ConfigMaps
+		// odh-trusted-ca-bundle, kube-root-ca.crt, workbench-trusted-ca-bundle
+		// and reconcile the workbench-trusted-ca-bundle ConfigMap,
+		Watches(&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
+				log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
+
+				// If the ConfigMap is odh-trusted-ca-bundle or kube-root-ca.crt
+				// trigger a reconcile event for first notebook in the namespace
+				if o.GetName() == "odh-trusted-ca-bundle" {
+					// List all the notebooks in the namespace and trigger a reconcile event
+					var nbList nbv1.NotebookList
+					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+						log.Error(err, "Unable to list Notebooks when attempting to handle Global CA Bundle event.")
+						return []reconcile.Request{}
+					}
+
+					// As there is only one configmap workbench-trusted-ca-bundle per namespace
+					// and is used by all the notebooks in the namespace, we can trigger
+					// reconcile event only for the first notebook in the list.
+					for _, nb := range nbList.Items {
+						return []reconcile.Request{
+							{
+								NamespacedName: types.NamespacedName{
+									Name:      nb.Name,
+									Namespace: o.GetNamespace(),
+								},
+							},
+						}
+					}
+				}
+
+				// If the ConfigMap is workbench-trusted-ca-bundle
+				// trigger a reconcile event for all the notebooks in the namespace
+				// containing the ConfigMap workbench-trusted-ca-bundle as a volume.
+				if o.GetName() == "workbench-trusted-ca-bundle" {
+					// List all the notebooks in the namespace and trigger a reconcile event
+					var nbList nbv1.NotebookList
+					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
+						log.Error(err, "Unable to list Notebook's when attempting to handle Global CA Bundle event.")
+						return []reconcile.Request{}
+					}
+
+					// For all the notebooks that mounted the ConfigMap workbench-trusted-ca-bundle
+					// as a volume, trigger a reconcile event.
+					reconcileRequests := []reconcile.Request{}
+					for _, nb := range nbList.Items {
+						for _, volume := range nb.Spec.Template.Spec.Volumes {
+							if volume.ConfigMap != nil && volume.ConfigMap.Name == o.GetName() {
+								namespacedName := types.NamespacedName{
+									Name:      nb.Name,
+									Namespace: o.GetNamespace(),
+								}
+								reconcileRequests = append(reconcileRequests, reconcile.Request{NamespacedName: namespacedName})
+							}
+						}
+					}
+					return reconcileRequests
+				}
+				return []reconcile.Request{}
+			}),
+		)
 	err := builder.Complete(r)
 	if err != nil {
 		return err

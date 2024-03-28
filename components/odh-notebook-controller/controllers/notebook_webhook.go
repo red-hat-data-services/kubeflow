@@ -17,9 +17,7 @@ package controllers
 
 import (
 	"context"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 
@@ -242,6 +240,8 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
+
+		// Only Mount ca bundle on new notebook creation
 		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
@@ -274,119 +274,147 @@ func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
 // CheckAndMountCACertBundle checks if the odh-trusted-ca-bundle ConfigMap is present
 func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, log logr.Logger) error {
 
-	// Define the name of the ConfigMap to be mounted
-	configMapName := "odh-trusted-ca-bundle"
+	workbenchConfigMapName := "workbench-trusted-ca-bundle"
+	odhConfigMapName := "odh-trusted-ca-bundle"
 
-	// get configmap based on its name and the namespace
-	configMap := &corev1.ConfigMap{}
-	if err := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
-		log.Info("Unable to fetch ConfigMap", "configMap", configMapName)
+	// if the odh-trusted-ca-bundle ConfigMap is not present, skip the process
+	// as operator might have disabled the feature.
+	odhConfigMap := &corev1.ConfigMap{}
+	odhErr := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: odhConfigMapName}, odhConfigMap)
+	if odhErr != nil {
+		log.Info("odh-trusted-ca-bundle ConfigMap is not present, not starting mounting process.")
 		return nil
 	}
 
-	// Search for the odh-trusted-ca-bundle ConfigMap
-	cm := configMap
-	if cm.Name == configMapName {
-
-		volumeName := "trusted-ca"
-		caVolumeMountPath := "/etc/pki/tls/certs/custom-ca-bundle.crt"
-		odhVolumeMountPath := "/etc/pki/tls/certs/custom-odh-ca-bundle.crt"
-		// Define volume mounts for both certificates
-		volumeMounts := []corev1.VolumeMount{}
-
-		isEmpty, err := certValidator(cm, "ca-bundle.crt", log)
-		if err == nil {
-			if isEmpty {
-				log.Info("Certificates in 'ca-bundle.crt' are empty, skipping mounting")
-			} else {
-				customCAVolumeMounts := []corev1.VolumeMount{
-					{
-						Name:      volumeName,
-						MountPath: caVolumeMountPath,
-						SubPath:   "custom-ca-bundle.crt",
-						ReadOnly:  true,
-					},
-				}
-				volumeMounts = append(volumeMounts, customCAVolumeMounts...)
-				log.Info("Certificates in 'ca-bundle.crt' are valid and can be mounted")
-			}
-		} else {
-			log.Error(err, "Error validating certificates for ca-bundle.crt. They cannot be mounted")
-		}
-
-		isEmpty, err = certValidator(cm, "odh-ca-bundle.crt", log)
-		if err == nil {
-			if isEmpty {
-				log.Info("Certificates in 'odh-ca-bundle.crt' are empty, skipping mounting")
-			} else {
-				customODHCAVolumeMounts := []corev1.VolumeMount{
-					{
-						Name:      volumeName,
-						MountPath: odhVolumeMountPath,
-						SubPath:   "custom-odh-ca-bundle.crt",
-						ReadOnly:  true,
-					},
-				}
-				volumeMounts = append(volumeMounts, customODHCAVolumeMounts...)
-				log.Info("Certificates in 'odh-ca-bundle.crt' are valid and can be mounted")
-			}
-		} else {
-			log.Error(err, "Error validating certificates for odh-ca-bundle.crt. They cannot be mounted")
-		}
-
-		// Add volume mount to the pod's spec
-		notebook.Spec.Template.Spec.Containers[0].VolumeMounts = append(notebook.Spec.Template.Spec.Containers[0].VolumeMounts, volumeMounts...)
-
-		// Create volume for mounting the CA certificate from the ConfigMap with key and path
-		configMapVolume := corev1.Volume{
-			Name: volumeName,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: cm.Name},
-					Optional:             pointer.Bool(true),
-					Items: []corev1.KeyToPath{
-						{
-							Key:  "ca-bundle.crt",
-							Path: "custom-ca-bundle.crt",
-						},
-						{
-							Key:  "odh-ca-bundle.crt",
-							Path: "custom-odh-ca-bundle.crt",
-						},
-					},
-				},
-			},
-		}
-
-		// Add volume to the pod's spec
-		notebook.Spec.Template.Spec.Volumes = append(notebook.Spec.Template.Spec.Volumes, configMapVolume)
+	// if the workbench-trusted-ca-bundle ConfigMap is not present,
+	// controller was not successful in creating the ConfigMap, skip the process
+	workbenchConfigMap := &corev1.ConfigMap{}
+	err := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: workbenchConfigMapName}, workbenchConfigMap)
+	if err != nil {
+		log.Info("workbench-trusted-ca-bundle ConfigMap is not present, skipping mounting of certificates.")
 		return nil
+	}
+
+	cm := workbenchConfigMap
+	if cm.Name == workbenchConfigMapName {
+		// Inject the trusted-ca volume and environment variables
+		log.Info("Injecting trusted-ca volume and environment variables", notebook.Name, "namespace", notebook.Namespace)
+		return InjectCertConfig(notebook, workbenchConfigMapName)
 	}
 	return nil
 }
 
-func certValidator(cm *corev1.ConfigMap, dataKey string, log logr.Logger) (bool, error) {
+func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 
-	odhCertData, ok := cm.Data[dataKey]
-	if !ok || odhCertData == "" {
-		// Print a warning if odh-ca-bundle.crt data is empty
-		log.Info(fmt.Sprintf("%s data are empty", dataKey))
-		return true, nil // Indicate that the certificate is empty
+	// ConfigMap details
+	configVolumeName := "trusted-ca"
+	configMapMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
+	configMapMountKey := "ca-bundle.crt"
+	configMapMountValue := "ca-bundle.crt"
+	configEnvVars := map[string]string{
+		"PIP_CERT":               configMapMountPath,
+		"REQUESTS_CA_BUNDLE":     configMapMountPath,
+		"SSL_CERT_FILE":          configMapMountPath,
+		"PIPELINES_SSL_SA_CERTS": configMapMountPath,
 	}
 
-	// Attempt to decode PEM encoded certificate
-	odhBlock, _ := pem.Decode([]byte(odhCertData))
-	if odhBlock != nil && odhBlock.Type == "CERTIFICATE" {
-		// Attempt to parse the certificate
-		_, err := x509.ParseCertificate(odhBlock.Bytes)
-		if err != nil {
-			log.Error(nil, fmt.Sprintf("error parsing certificate for key '%s' in ConfigMap odh-trusted-ca-bundle", dataKey))
-			return false, fmt.Errorf("error parsing certificate for key '%s' in ConfigMap odh-trusted-ca-bundle", dataKey)
+	notebookContainers := &notebook.Spec.Template.Spec.Containers
+	var imgContainer corev1.Container
+
+	// Add trusted-ca volume
+	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
+	certVolumeExists := false
+	certVolume := corev1.Volume{
+		Name: configVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: configMapName,
+				},
+				Optional: pointer.Bool(true),
+				Items: []corev1.KeyToPath{{
+					Key:  configMapMountKey,
+					Path: configMapMountValue,
+				},
+				},
+			},
+		},
+	}
+	for index, volume := range *notebookVolumes {
+		if volume.Name == configVolumeName {
+			(*notebookVolumes)[index] = certVolume
+			certVolumeExists = true
+			break
 		}
-	} else if len(odhCertData) > 0 {
-		log.Error(nil, fmt.Sprintf("invalid certificate format for key '%s' in ConfigMap odh-trusted-ca-bundle", dataKey))
-		return false, fmt.Errorf("invalid certificate format for key '%s' in ConfigMap odh-trusted-ca-bundle", dataKey)
+	}
+	if !certVolumeExists {
+		*notebookVolumes = append(*notebookVolumes, certVolume)
 	}
 
-	return false, nil
+	// Update Notebook Image container with env variables and Volume Mounts
+	for _, container := range *notebookContainers {
+		// Update notebook image container with env Variables
+		if container.Name == notebook.Name {
+			var newVars []corev1.EnvVar
+			imgContainer = container
+
+			for key, val := range configEnvVars {
+				keyExists := false
+				for _, env := range imgContainer.Env {
+					if key == env.Name {
+						keyExists = true
+						// Update if env value is updated
+						if env.Value != val {
+							env.Value = val
+						}
+					}
+				}
+				if !keyExists {
+					newVars = append(newVars, corev1.EnvVar{Name: key, Value: val})
+				}
+			}
+
+			// Update container only when required env variables are not present
+			imgContainerExists := false
+			if len(newVars) != 0 {
+				imgContainer.Env = append(imgContainer.Env, newVars...)
+			}
+
+			// Create Volume mount
+			volumeMountExists := false
+			containerVolMounts := &imgContainer.VolumeMounts
+			trustedCAVolMount := corev1.VolumeMount{
+				Name:      configVolumeName,
+				ReadOnly:  true,
+				MountPath: configMapMountPath,
+				SubPath:   configMapMountValue,
+			}
+
+			for index, volumeMount := range *containerVolMounts {
+				if volumeMount.Name == configVolumeName {
+					(*containerVolMounts)[index] = trustedCAVolMount
+					volumeMountExists = true
+					break
+				}
+			}
+			if !volumeMountExists {
+				*containerVolMounts = append(*containerVolMounts, trustedCAVolMount)
+			}
+
+			// Update container with Env and Volume Mount Changes
+			for index, container := range *notebookContainers {
+				if container.Name == notebook.Name {
+					(*notebookContainers)[index] = imgContainer
+					imgContainerExists = true
+					break
+				}
+			}
+
+			if !imgContainerExists {
+				return fmt.Errorf("notebook image container not found %v", notebook.Name)
+			}
+			break
+		}
+	}
+	return nil
 }
