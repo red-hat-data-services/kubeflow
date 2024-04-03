@@ -291,8 +291,24 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 	workbenchConfigMap := &corev1.ConfigMap{}
 	err := cli.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: workbenchConfigMapName}, workbenchConfigMap)
 	if err != nil {
-		log.Info("workbench-trusted-ca-bundle ConfigMap is not present, skipping mounting of certificates.")
-		return nil
+		log.Info("workbench-trusted-ca-bundle ConfigMap is not present, start creating it...")
+		// create the ConfigMap if it does not exist
+		workbenchConfigMap = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      workbenchConfigMapName,
+				Namespace: notebook.Namespace,
+				Labels:    map[string]string{"opendatahub.io/managed-by": "workbenches"},
+			},
+			Data: map[string]string{
+				"ca-bundle.crt": odhConfigMap.Data["ca-bundle.crt"],
+			},
+		}
+		err = cli.Create(ctx, workbenchConfigMap)
+		if err != nil {
+			log.Info("Failed to create workbench-trusted-ca-bundle ConfigMap")
+			return nil
+		}
+		log.Info("Created workbench-trusted-ca-bundle ConfigMap")
 	}
 
 	cm := workbenchConfigMap

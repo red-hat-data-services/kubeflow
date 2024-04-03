@@ -178,6 +178,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By simulating the existence of odh-trusted-ca-bundle ConfigMap")
 			// Create a ConfigMap similar to odh-trusted-ca-bundle for simulation
+			workbenchTrustedCACertBundle := "workbench-trusted-ca-bundle"
 			trustedCACertBundle := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "odh-trusted-ca-bundle",
@@ -232,7 +233,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				Name: "trusted-ca",
 				VolumeSource: corev1.VolumeSource{
 					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{Name: trustedCACertBundle.Name},
+						LocalObjectReference: corev1.LocalObjectReference{Name: workbenchTrustedCACertBundle},
 						Optional:             pointer.Bool(true),
 						Items: []corev1.KeyToPath{
 							{
