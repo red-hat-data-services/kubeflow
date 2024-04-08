@@ -248,11 +248,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
-	// Add the workbench label on notebook update
-	if req.Operation == admissionv1.Update {
-		AddWorkbenchLabel(notebook)
-	}
-
 	// Inject the OAuth proxy if the annotation is present
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
