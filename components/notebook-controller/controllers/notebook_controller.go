@@ -162,7 +162,7 @@ func (r *NotebookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Copy the pod template labels, but reconcilation is not required
 	// exclusively based on ths pod template labels
-	if *ss.Spec.Replicas != *foundStateful.Spec.Replicas {
+	if ss.Spec.Replicas != nil && foundStateful.Spec.Replicas != nil && *ss.Spec.Replicas != *foundStateful.Spec.Replicas {
 		if !reflect.DeepEqual(foundStateful.Spec.Template.ObjectMeta.Labels, ss.Spec.Template.ObjectMeta.Labels) {
 			foundStateful.Spec.Template.ObjectMeta.Labels = ss.Spec.Template.ObjectMeta.Labels
 		}

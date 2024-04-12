@@ -1,9 +1,9 @@
-name: Run Notebook Controller unit tests
+name: Run ODH Notebook Controller unit tests
 on:
   push:
   pull_request:
     paths:
-      - components/notebook-controller/**
+      - components/odh-notebook-controller/**
   workflow_dispatch:
 
 jobs:
@@ -17,10 +17,10 @@ jobs:
       uses: actions/setup-go@v5
       with:
         check-latest: true
-        go-version-file: components/notebook-controller/go.mod
-        cache-dependency-path: components/notebook-controller/go.sum
+        go-version-file: components/odh-notebook-controller/go.mod
+        cache-dependency-path: components/odh-notebook-controller/go.sum
 
     - name: Run unit tests
       run: |
-        cd components/notebook-controller
+        cd components/odh-notebook-controller
         make test
