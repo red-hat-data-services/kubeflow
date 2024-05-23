@@ -4,7 +4,7 @@
 #
 # ${PATH_TO_KUBEFLOW/KUBEFLOW repo}/components
 #
-ARG GOLANG_VERSION=1.19
+ARG GOLANG_VERSION=1.20
 FROM golang:${GOLANG_VERSION} as builder
 
 WORKDIR /workspace
