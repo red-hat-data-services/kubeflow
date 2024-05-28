@@ -3,10 +3,11 @@ package e2e
 import (
 	"crypto/tls"
 	"fmt"
-	netv1 "k8s.io/api/networking/v1"
 	"log"
 	"net/http"
 	"time"
+
+	netv1 "k8s.io/api/networking/v1"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -227,4 +228,17 @@ func setupThothMinimalOAuthNotebook() notebookContext {
 		nbSpec:       &testNotebook.Spec,
 	}
 	return thothMinimalOAuthNbContext
+}
+
+// Setting func async to the upstream branch v1.7-branch,
+// as servicemesh changes have not been moved stable branch
+func notebooksForScenario(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
+	var filtered []notebookContext
+	for _, notebook := range notebooks {
+		if notebook.deploymentMode == mode {
+			filtered = append(filtered, notebook)
+		}
+	}
+
+	return filtered
 }

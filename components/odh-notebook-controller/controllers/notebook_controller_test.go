@@ -255,7 +255,40 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	})
 
-	Context("When creating a Notebook, test Networkpolicies", func() {
+	// New test case for notebook update
+	When("Updating a Notebook", func() {
+		const (
+			Name      = "test-notebook-update"
+			Namespace = "default"
+		)
+
+		notebook := createNotebook(Name, Namespace)
+
+		It("Should update the Notebook specification", func() {
+			ctx := context.Background()
+
+			By("By creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By updating the Notebook's image")
+			key := types.NamespacedName{Name: Name, Namespace: Namespace}
+			Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+
+			updatedImage := "registry.redhat.io/ubi8/ubi:updated"
+			notebook.Spec.Template.Spec.Containers[0].Image = updatedImage
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			By("By checking that the Notebook's image is updated")
+			Eventually(func() string {
+				Expect(cli.Get(ctx, key, notebook)).Should(Succeed())
+				return notebook.Spec.Template.Spec.Containers[0].Image
+			}, timeout, interval).Should(Equal(updatedImage))
+		})
+	})
+
+	When("Creating a Notebook, test Networkpolicies", func() {
 		const (
 			Name      = "test-notebook-np"
 			Namespace = "default"
@@ -871,3 +904,21 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 	})
 })
+
+// Setting func async to the upstream branch v1.7-branch,
+// as servicemesh changes have not been moved stable branch
+func createNotebook(name, namespace string) *nbv1.Notebook {
+	return &nbv1.Notebook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: nbv1.NotebookSpec{
+			Template: nbv1.NotebookTemplateSpec{
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Name:  name,
+					Image: "registry.redhat.io/ubi8/ubi:latest",
+				}}}},
+		},
+	}
+}

@@ -4,10 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	netv1 "k8s.io/api/networking/v1"
 	"os"
 	"testing"
 	"time"
+
+	netv1 "k8s.io/api/networking/v1"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -25,6 +26,7 @@ import (
 var (
 	notebookTestNamespace string
 	skipDeletion          bool
+	deploymentMode        DeploymentMode
 	scheme                = runtime.NewScheme()
 )
 
@@ -48,6 +50,32 @@ type testContext struct {
 	ctx context.Context
 }
 
+// DeploymentMode indicates what infra scenarios should be verified by the test
+// with default being OAuthProxy scenario.
+type DeploymentMode int
+
+const (
+	OAuthProxy DeploymentMode = iota
+)
+
+var modes = [...]string{"oauth"}
+
+// Implementing flag.Value funcs, so we can use DeploymentMode as a CLI flag.
+func (d *DeploymentMode) String() string {
+	return modes[*d]
+}
+
+func (d *DeploymentMode) Set(s string) error {
+	for i := range modes {
+		if modes[i] == s {
+			*d = DeploymentMode(i)
+			return nil
+		}
+	}
+
+	return errors.Errorf("Unknown deployment mode %s. Try any of these %v", s, modes)
+}
+
 // notebookContext holds information about test notebook
 // Any notebook that needs to be added to the e2e test suite should be defined in
 // the notebookContext struct.
@@ -55,7 +83,8 @@ type notebookContext struct {
 	// metadata for Notebook object
 	nbObjectMeta *metav1.ObjectMeta
 	// metadata for Notebook Spec
-	nbSpec *nbv1.NotebookSpec
+	nbSpec         *nbv1.NotebookSpec
+	deploymentMode DeploymentMode
 }
 
 func NewTestContext() (*testContext, error) {
@@ -106,8 +135,9 @@ func TestE2ENotebookController(t *testing.T) {
 	if !t.Run("validate controllers", testNotebookControllerValidation) {
 		return
 	}
-	// Run create and delete tests for all the test notebooks
+	// Run create, update and delete tests for all the test notebooks
 	t.Run("create", creationTestSuite)
+	t.Run("update", updateTestSuite)
 	if !skipDeletion {
 		t.Run("delete", deletionTestSuite)
 	}
@@ -118,6 +148,7 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&notebookTestNamespace, "nb-namespace",
 		"e2e-notebook-controller", "Custom namespace where the notebook contollers are deployed")
 	flag.BoolVar(&skipDeletion, "skip-deletion", false, "skip deletion of the controllers")
+	flag.Var(&deploymentMode, "deploymentMode", "sets deployment mode")
 	flag.Parse()
 	os.Exit(m.Run())
 }
