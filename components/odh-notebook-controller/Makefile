@@ -170,7 +170,7 @@ undeploy-dev: setup undeploy-kf ## Undeploy controller from the Openshift cluste
 
 .PHONY: e2e-test
 e2e-test: ## Run e2e tests for the controller
-	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} ${E2E_TEST_FLAGS}
+	go test ./e2e/ -run ^TestE2ENotebookController -v --nb-namespace=${K8S_NAMESPACE} --deploymentMode=oauth ${E2E_TEST_FLAGS}
 
 .PHONY: run-ci-e2e-tests
 run-ci-e2e-tests:

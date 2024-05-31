@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -28,7 +30,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -40,6 +45,7 @@ import (
 type NotebookWebhook struct {
 	Log         logr.Logger
 	Client      client.Client
+	Config      *rest.Config
 	Decoder     *admission.Decoder
 	OAuthConfig OAuthConfig
 }
@@ -248,6 +254,15 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
+	// Check Imagestream Info both on create and update operations
+	if req.Operation == admissionv1.Create || req.Operation == admissionv1.Update {
+		// Check Imagestream Info
+		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+	}
+
 	// Inject the OAuth proxy if the annotation is present
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
@@ -430,6 +445,118 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 				return fmt.Errorf("notebook image container not found %v", notebook.Name)
 			}
 			break
+		}
+	}
+	return nil
+}
+
+// SetContainerImageFromRegistry checks if there is an internal registry and takes the corresponding actions to set the container.image value.
+// If an internal registry is detected, it uses the default values specified in the Notebook Custom Resource (CR).
+// Otherwise, it checks the last-image-selection annotation to find the image stream and fetches the image from status.dockerImageReference,
+// assigning it to the container.image value.
+func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger) error {
+	// Create a dynamic client
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		log.Error(err, "Error creating dynamic client")
+		return err
+	}
+	// Specify the GroupVersionResource for imagestreams
+	ims := schema.GroupVersionResource{
+		Group:    "image.openshift.io",
+		Version:  "v1",
+		Resource: "imagestreams",
+	}
+
+	annotations := notebook.GetAnnotations()
+	if annotations != nil {
+		if imageSelection, exists := annotations["notebooks.opendatahub.io/last-image-selection"]; exists {
+
+			containerFound := false
+			// Iterate over containers to find the one matching the notebook name
+			for i, container := range notebook.Spec.Template.Spec.Containers {
+				if container.Name == notebook.Name {
+					containerFound = true
+
+					// Check if the container.Image value has an internal registry, if so  will pickup this without extra checks.
+					// This value constructed on the initialization of the Notebook CR.
+					if strings.Contains(container.Image, "image-registry.openshift-image-registry.svc:5000") {
+						log.Info("Internal registry found. Will pick up the default value from image field.")
+						return nil
+					} else {
+						log.Info("No internal registry found, let's pick up image reference from relevant ImageStream 'status.tags[].tag.dockerImageReference'")
+
+						// Split the imageSelection to imagestream and tag
+						imageSelected := strings.Split(imageSelection, ":")
+						if len(imageSelected) != 2 {
+							log.Error(nil, "Invalid image selection format")
+							return fmt.Errorf("invalid image selection format")
+						}
+
+						// Specify the namespaces to search in
+						namespaces := []string{"opendatahub", "redhat-ods-applications"}
+						imagestreamFound := false
+						for _, namespace := range namespaces {
+							// List imagestreams in the specified namespace
+							imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
+							if err != nil {
+								log.Error(err, "Cannot list imagestreams", "namespace", namespace)
+								continue
+							}
+
+							// Iterate through the imagestreams to find matches
+							for _, item := range imagestreams.Items {
+								metadata := item.Object["metadata"].(map[string]interface{})
+								name := metadata["name"].(string)
+
+								// Match with the ImageStream name
+								if name == imageSelected[0] {
+									status := item.Object["status"].(map[string]interface{})
+
+									// Match to the corresponding tag of the image
+									tags := status["tags"].([]interface{})
+									for _, t := range tags {
+										tagMap := t.(map[string]interface{})
+										tagName := tagMap["tag"].(string)
+										if tagName == imageSelected[1] {
+											items := tagMap["items"].([]interface{})
+											if len(items) > 0 {
+												// Sort items by creationTimestamp to get the most recent one
+												sort.Slice(items, func(i, j int) bool {
+													iTime := items[i].(map[string]interface{})["created"].(string)
+													jTime := items[j].(map[string]interface{})["created"].(string)
+													return iTime > jTime // Lexicographical comparison of RFC3339 timestamps
+												})
+												imageHash := items[0].(map[string]interface{})["dockerImageReference"].(string)
+												// Update the Containers[i].Image value
+												notebook.Spec.Template.Spec.Containers[i].Image = imageHash
+												// Update the JUPYTER_IMAGE environment variable with the image selection for example "jupyter-datascience-notebook:2023.2"
+												for i, envVar := range container.Env {
+													if envVar.Name == "JUPYTER_IMAGE" {
+														container.Env[i].Value = imageSelection
+														break
+													}
+												}
+												imagestreamFound = true
+												break
+											}
+										}
+									}
+								}
+							}
+							if imagestreamFound {
+								break
+							}
+						}
+						if !imagestreamFound {
+							log.Error(nil, "Imagestream not found in any of the specified namespaces", "imageSelected", imageSelected[0], "tag", imageSelected[1])
+						}
+					}
+				}
+			}
+			if !containerFound {
+				log.Error(nil, "No container found matching the notebook name", "notebookName", notebook.Name)
+			}
 		}
 	}
 	return nil
