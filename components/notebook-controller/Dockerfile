@@ -52,6 +52,6 @@ COPY --from=builder \
       /manager
 
 ## Switch to a non-root user
-USER rhods
+USER 1001:0
 
 ENTRYPOINT [ "/manager" ]
