@@ -13,7 +13,19 @@ jupyterlab-git==0.30.1
 matplotlib==3.4.2
 pandas==1.2.4
 scikit-image==0.18.1
-scikit-learn==0.24.2
-scipy==1.7.0
+scikit-learn==1.5.0
+scipy==1.10.0rc1
 seaborn==0.11.1
 xgboost==1.4.2
+anyio>=4.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
+azure-storage-blob>=12.13.0 # not directly required, pinned by Snyk to avoid a vulnerability
+ipython>=8.10.0 # not directly required, pinned by Snyk to avoid a vulnerability
+jupyter-server>=2.14.1 # not directly required, pinned by Snyk to avoid a vulnerability
+numpy>=1.22.2 # not directly required, pinned by Snyk to avoid a vulnerability
+pillow>=10.3.0 # not directly required, pinned by Snyk to avoid a vulnerability
+requests>=2.32.2 # not directly required, pinned by Snyk to avoid a vulnerability
+setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
+tornado>=6.4.1 # not directly required, pinned by Snyk to avoid a vulnerability
+urllib3>=2.2.2 # not directly required, pinned by Snyk to avoid a vulnerability
+wheel>=0.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
