@@ -3,6 +3,8 @@ package e2e
 import (
 	"fmt"
 	"log"
+	"net/http"
+	"net/http/httputil"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +23,8 @@ import (
 func creationTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	for _, nbContext := range testCtx.testNotebooks {
+	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
+	for _, nbContext := range notebooksForSelectedDeploymentMode {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Creation of Notebook instance", func(t *testing.T) {
@@ -29,6 +32,9 @@ func creationTestSuite(t *testing.T) {
 				require.NoError(t, err, "error creating Notebook object ")
 			})
 			t.Run("Notebook Route Validation", func(t *testing.T) {
+				if deploymentMode == ServiceMesh {
+					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
+				}
 				err = testCtx.testNotebookRouteCreation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Route for Notebook ")
 			})
@@ -42,14 +48,20 @@ func creationTestSuite(t *testing.T) {
 				err = testCtx.testNotebookValidation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing StatefulSet for Notebook ")
 			})
+
 			t.Run("Notebook OAuth sidecar Validation", func(t *testing.T) {
+				if deploymentMode == ServiceMesh {
+					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
+				}
 				err = testCtx.testNotebookOAuthSidecar(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar for Notebook ")
 			})
+
 			t.Run("Verify Notebook Traffic", func(t *testing.T) {
 				err = testCtx.testNotebookTraffic(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Notebook traffic ")
 			})
+
 			t.Run("Verify Notebook Culling", func(t *testing.T) {
 				err = testCtx.testNotebookCulling(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Notebook culling ")
@@ -115,8 +127,48 @@ func (tc *testContext) testNotebookRouteCreation(nbMeta *metav1.ObjectMeta) erro
 }
 
 func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) error {
+	err := tc.ensureNetworkPolicyAllowingAccessToOnlyNotebookControllerExists(nbMeta)
+	if err != nil {
+		return err
+	}
+
+	if deploymentMode == OAuthProxy {
+		return tc.ensureOAuthNetworkPolicyExists(nbMeta, err)
+	}
+
+	return nil
+}
+
+func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta, err error) error {
+	// Test Notebook Network policy that allows all requests on Notebook OAuth port
+	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+"-oauth-np")
+	if err != nil {
+		return fmt.Errorf("error getting network policy for Notebook OAuth port %v: %v", notebookOAuthNetworkPolicy.Name, err)
+	}
+
+	if len(notebookOAuthNetworkPolicy.Spec.PolicyTypes) == 0 || notebookOAuthNetworkPolicy.Spec.PolicyTypes[0] != netv1.PolicyTypeIngress {
+		return fmt.Errorf("invalid policy type. Expected value :%v", netv1.PolicyTypeIngress)
+	}
+
+	if len(notebookOAuthNetworkPolicy.Spec.Ingress) == 0 {
+		return fmt.Errorf("invalid network policy, should contain ingress rule")
+	} else if len(notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports) != 0 {
+		isNotebookPort := false
+		for _, notebookport := range notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports {
+			if notebookport.Port.IntVal == 8443 {
+				isNotebookPort = true
+			}
+		}
+		if !isNotebookPort {
+			return fmt.Errorf("invalid Network Policy comfiguration")
+		}
+	}
+	return err
+}
+
+func (tc *testContext) ensureNetworkPolicyAllowingAccessToOnlyNotebookControllerExists(nbMeta *metav1.ObjectMeta) error {
 	// Test Notebook Network Policy that allows access only to Notebook Controller
-	notebookNetworkPolicy, err := tc.getNotebookNetworkpolicy(nbMeta, nbMeta.Name+"-ctrl-np")
+	notebookNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+"-ctrl-np")
 	if err != nil {
 		return fmt.Errorf("error getting network policy for Notebook %v: %v", notebookNetworkPolicy.Name, err)
 	}
@@ -141,30 +193,7 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 		return fmt.Errorf("invalid Network Policy comfiguration")
 	}
 
-	// Test Notebook Network policy that allows all requests on Notebook OAuth port
-	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkpolicy(nbMeta, nbMeta.Name+"-oauth-np")
-	if err != nil {
-		return fmt.Errorf("error getting network policy for Notebook OAuth port %v: %v", notebookOAuthNetworkPolicy.Name, err)
-	}
-
-	if len(notebookOAuthNetworkPolicy.Spec.PolicyTypes) == 0 || notebookOAuthNetworkPolicy.Spec.PolicyTypes[0] != netv1.PolicyTypeIngress {
-		return fmt.Errorf("invalid policy type. Expected value :%v", netv1.PolicyTypeIngress)
-	}
-
-	if len(notebookOAuthNetworkPolicy.Spec.Ingress) == 0 {
-		return fmt.Errorf("invalid network policy, should contain ingress rule")
-	} else if len(notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports) != 0 {
-		isNotebookPort := false
-		for _, notebookport := range notebookOAuthNetworkPolicy.Spec.Ingress[0].Ports {
-			if notebookport.Port.IntVal == 8443 {
-				isNotebookPort = true
-			}
-		}
-		if !isNotebookPort {
-			return fmt.Errorf("invalid Network Policy comfiguration")
-		}
-	}
-	return err
+	return nil
 }
 
 func (tc *testContext) testNotebookValidation(nbMeta *metav1.ObjectMeta) error {
@@ -223,7 +252,7 @@ func (tc *testContext) testNotebookTraffic(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error accessing Notebook Endpoint: %v ", err)
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Unexpected response from Notebook Endpoint")
+		return errorWithBody(resp)
 	}
 	return nil
 }
@@ -261,15 +290,24 @@ func (tc *testContext) testNotebookCulling(nbMeta *metav1.ObjectMeta) error {
 		return fmt.Errorf("error rolling out the deployment with culling configuration: %v", err)
 	}
 
-	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 2.5 minutes)
-	time.Sleep(150 * time.Second)
+	// Wait for server to shut down after 'CULL_IDLE_TIME' minutes(around 3 minutes)
+	time.Sleep(180 * time.Second)
 	// Verify that the notebook kernel has shutdown, and the notebook endpoint returns 503
 	resp, err := tc.curlNotebookEndpoint(*nbMeta)
 	if err != nil {
 		return fmt.Errorf("error accessing Notebook Endpoint with 503: %v ", err)
 	}
 	if resp.StatusCode != 503 {
-		return fmt.Errorf("Unexpected response from Notebook Endpoint")
+		return errorWithBody(resp)
 	}
 	return nil
+}
+
+func errorWithBody(resp *http.Response) error {
+	dump, err := httputil.DumpResponse(resp, false)
+	if err != nil {
+		return err
+	}
+
+	return fmt.Errorf("unexpected response from Notebook Endpoint:\n%+v", string(dump))
 }

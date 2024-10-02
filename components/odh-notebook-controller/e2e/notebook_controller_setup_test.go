@@ -40,7 +40,7 @@ type testContext struct {
 	customClient client.Client
 	// namespace for running the tests
 	testNamespace string
-	// time rquired to create a resource
+	// time required to create a resource
 	resourceCreationTimeout time.Duration
 	// time interval to check for resource creation
 	resourceRetryInterval time.Duration
@@ -56,9 +56,16 @@ type DeploymentMode int
 
 const (
 	OAuthProxy DeploymentMode = iota
+<<<<<<< HEAD
 )
 
 var modes = [...]string{"oauth"}
+=======
+	ServiceMesh
+)
+
+var modes = [...]string{"oauth", "service-mesh"}
+>>>>>>> fa442a1b5f0fc2c0ae8d981bfcb396b26773ef79
 
 // Implementing flag.Value funcs, so we can use DeploymentMode as a CLI flag.
 func (d *DeploymentMode) String() string {
@@ -91,7 +98,7 @@ func NewTestContext() (*testContext, error) {
 
 	// GetConfig(): If KUBECONFIG env variable is set, it is used to create
 	// the client, else the inClusterConfig() is used.
-	// Lastly if none of the them are set, it uses  $HOME/.kube/config to create the client.
+	// Lastly if none of them are set, it uses  $HOME/.kube/config to create the client.
 	config, err := ctrlruntime.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error creating the config object %v", err)
@@ -109,7 +116,7 @@ func NewTestContext() (*testContext, error) {
 	}
 
 	// Setup all test Notebooks
-	testNotebooksContextList := []notebookContext{setupThothMinimalOAuthNotebook()}
+	testNotebooksContextList := []notebookContext{setupThothMinimalOAuthNotebook(), setupThothMinimalServiceMeshNotebook()}
 
 	return &testContext{
 		cfg:                     config,
@@ -123,12 +130,12 @@ func NewTestContext() (*testContext, error) {
 	}, nil
 }
 
-// TestKFNBC sets up the testing suite for KFNBC.
+// TestE2ENotebookController sets up the testing suite for KFNBC.
 func TestE2ENotebookController(t *testing.T) {
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(nbv1.AddToScheme(scheme))
-	utilruntime.Must(routev1.AddToScheme(scheme))
+	utilruntime.Must(routev1.Install(scheme))
 	utilruntime.Must(netv1.AddToScheme(scheme))
 
 	// individual test suites after the operator is running
@@ -144,11 +151,11 @@ func TestE2ENotebookController(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	// call flag.Parse() here if TestMain uses flags
 	flag.StringVar(&notebookTestNamespace, "nb-namespace",
-		"e2e-notebook-controller", "Custom namespace where the notebook contollers are deployed")
+		"e2e-notebook-controller", "Custom namespace where the notebook controllers are deployed")
 	flag.BoolVar(&skipDeletion, "skip-deletion", false, "skip deletion of the controllers")
 	flag.Var(&deploymentMode, "deploymentMode", "sets deployment mode")
 	flag.Parse()
+
 	os.Exit(m.Run())
 }

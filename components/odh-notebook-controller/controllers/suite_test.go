@@ -23,7 +23,13 @@ import (
 	"testing"
 	"time"
 
+<<<<<<< HEAD
 	netv1 "k8s.io/api/networking/v1"
+=======
+	v1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+>>>>>>> fa442a1b5f0fc2c0ae8d981bfcb396b26773ef79
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,11 +59,17 @@ import (
 // +kubebuilder:docs-gen:collapse=Imports
 
 var (
-	cfg     *rest.Config
-	cli     client.Client
-	envTest *envtest.Environment
-	ctx     context.Context
-	cancel  context.CancelFunc
+	cfg            *rest.Config
+	cli            client.Client
+	envTest        *envtest.Environment
+	ctx            context.Context
+	cancel         context.CancelFunc
+	testNamespaces = []string{}
+)
+
+const (
+	timeout  = time.Second * 10
+	interval = time.Second * 2
 )
 
 func TestAPIs(t *testing.T) {
@@ -166,6 +178,15 @@ var _ = BeforeSuite(func() {
 	// Verify kubernetes client is working
 	cli = mgr.GetClient()
 	Expect(cli).ToNot(BeNil())
+
+	for _, namespace := range testNamespaces {
+		ns := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: namespace,
+			},
+		}
+		Expect(cli.Create(ctx, ns)).To(Succeed())
+	}
 
 }, 60)
 

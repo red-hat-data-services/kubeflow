@@ -52,11 +52,11 @@ type NotebookWebhook struct {
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
-// controller finishes the reconciliation. Otherwise a race condition may happen
+// controller finishes the reconciliation. Otherwise, a race condition may happen
 // while mounting the notebook service account pull secret into the pod.
 //
 // The ODH notebook controller will remove this annotation when the first
-// reconcilitation is completed (see RemoveReconciliationLock).
+// reconciliation is completed (see RemoveReconciliationLock).
 func InjectReconciliationLock(meta *metav1.ObjectMeta) error {
 	if meta.Annotations != nil {
 		meta.Annotations[culler.STOP_ANNOTATION] = AnnotationValueReconciliationLock
@@ -247,6 +247,24 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
+<<<<<<< HEAD
+	}
+
+	// Check Imagestream Info both on create and update operations
+	if req.Operation == admissionv1.Create || req.Operation == admissionv1.Update {
+		// Check Imagestream Info
+		err = SetContainerImageFromRegistry(ctx, w.Config, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		// Mount ca bundle on notebook creation and update
+		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+=======
+>>>>>>> fa442a1b5f0fc2c0ae8d981bfcb396b26773ef79
 	}
 
 	// Check Imagestream Info both on create and update operations
@@ -264,14 +282,20 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
-	// Inject the OAuth proxy if the annotation is present
+<<<<<<< HEAD
+=======
+	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
+			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
+		}
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 	}
 
+>>>>>>> fa442a1b5f0fc2c0ae8d981bfcb396b26773ef79
 	// Create the mutated notebook object
 	marshaledNotebook, err := json.Marshal(notebook)
 	if err != nil {
