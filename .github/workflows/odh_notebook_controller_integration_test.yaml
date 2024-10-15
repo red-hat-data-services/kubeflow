@@ -136,7 +136,7 @@ jobs:
           kustomize edit set image ${CURRENT_NOTEBOOK_IMG}=${PR_NOTEBOOK_IMG}
 
           # configure culler
-          cat <<EOF | oc apply -f -
+          cat <<EOF | kubectl apply -f -
           ---
           apiVersion: v1
           kind: ConfigMap
@@ -169,7 +169,7 @@ jobs:
 
           echo "odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}" > params.env
 
-          cat <<EOF | oc apply -f -
+          cat <<EOF | kubectl apply -f -
           ---
           apiVersion: v1
           kind: ConfigMap
@@ -225,7 +225,7 @@ jobs:
       - name: Create notebook and check it, this is from kubeflow readme
         run: |
           notebook_namespace=default
-          cat <<EOF | oc apply -f -
+          cat <<EOF | kubectl apply -f -
           ---
           apiVersion: kubeflow.org/v1
           kind: Notebook

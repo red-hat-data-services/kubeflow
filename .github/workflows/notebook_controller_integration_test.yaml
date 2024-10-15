@@ -89,7 +89,7 @@ jobs:
           export PR_NOTEBOOK_IMG=localhost/${{env.IMG}}:${{env.TAG}}
           kustomize edit set image ${CURRENT_NOTEBOOK_IMG}=${PR_NOTEBOOK_IMG}
 
-          cat <<EOF | oc apply -f -
+          cat <<EOF | kubectl apply -f -
           ---
           apiVersion: v1
           kind: ConfigMap
