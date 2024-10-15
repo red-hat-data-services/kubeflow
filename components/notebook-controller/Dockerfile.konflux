@@ -1,6 +1,5 @@
 # Build arguments
 ARG SOURCE_CODE=.
-ARG CI_CONTAINER_VERSION="unknown"
 ARG GOLANG_VERSION=1.21
 
 # Use ubi8/go-toolset as base image
@@ -10,7 +9,6 @@ ARG TARGETARCH
 
 ## Build args to be used at this step
 ARG SOURCE_CODE
-
 
 #WORKDIR /workspace
 
@@ -35,9 +33,6 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GO111MODULE=on go
 # Use ubi8/ubi-minimal as base image
 FROM registry.redhat.io/ubi8/ubi-minimal@sha256:7583ca0ea52001562bd81a961da3f75222209e6192e4e413ee226cff97dbd48c
 
-## Build args to be used at this step
-ARG CI_CONTAINER_VERSION
-
 ## Install additional packages
 RUN microdnf install -y shadow-utils &&\
     microdnf clean all
@@ -45,13 +40,11 @@ RUN microdnf install -y shadow-utils &&\
 ## Create a non-root user with UID 1001
 RUN useradd --uid 1001 --create-home --user-group --system rhods
 
-
 ## Set workdir directory to user home
 WORKDIR /home/rhods
 
 ## Copy odh-notebook-controller-manager binary from builder stage
 COPY --from=builder /opt/rhods/odh-notebook-controller/bin/manager .
-
 
 ## Switch to a non-root user
 USER 1001:0
@@ -60,12 +53,10 @@ ENTRYPOINT [ "/manager" ]
 
 LABEL com.redhat.component="odh-notebook-controller-container" \
       name="managed-open-data-hub/odh-notebook-controller-rhel8" \
-      version="${CI_CONTAINER_VERSION}" \
-      git.url="${CI_KUBEFLOW_UPSTREAM_URL}" \
-      git.commit="${CI_KUBEFLOW_UPSTREAM_COMMIT}" \
+      description="odh-notebook-controller" \
       summary="odh-notebook-controller" \
+      maintainer="['managed-open-data-hub@redhat.com']" \
       io.openshift.expose-services="" \
       io.k8s.display-name="odh-notebook-controller" \
-      maintainer="['managed-open-data-hub@redhat.com']" \
-      description="odh-notebook-controller" \
+      io.k8s.description="odh-notebook-controller" \
       com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
