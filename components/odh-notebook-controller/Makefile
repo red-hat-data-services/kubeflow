@@ -4,7 +4,7 @@ IMG ?= quay.io/opendatahub/odh-notebook-controller
 TAG ?= $(shell git describe --tags --always)
 
 KF_IMG ?= quay.io/opendatahub/kubeflow-notebook-controller
-KF_TAG ?= 1.9-fa442a1
+KF_TAG ?= 1.9-c5d8c55
 
 CONTAINER_ENGINE ?= podman
 
