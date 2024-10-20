@@ -10,11 +10,14 @@ ARG TARGETARCH
 ## Build args to be used at this step
 ARG SOURCE_CODE
 
-#WORKDIR /workspace
-
 WORKDIR /opt/rhods
 # Copy the Go Modules manifests
 COPY ${SOURCE_CODE}/notebook-controller ./notebook-controller
+
+# This is necessary because the Jupyter controller now depends on
+# components/common
+COPY ${SOURCE_CODE}/common ./common
+
 COPY ${SOURCE_CODE}/odh-notebook-controller ./odh-notebook-controller
 
 WORKDIR /opt/rhods/odh-notebook-controller
