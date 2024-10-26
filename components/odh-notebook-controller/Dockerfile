@@ -1,36 +1,57 @@
-# Build the manager binary
-#
-# The Docker context is expected to be:
-#
-# ${PATH_TO_KUBEFLOW/KUBEFLOW repo}/components
-#
-ARG GOLANG_VERSION=1.20
-FROM golang:${GOLANG_VERSION} as builder
+# Build arguments
+ARG SOURCE_CODE=.
+ARG CI_CONTAINER_VERSION="unknown"
 
-WORKDIR /workspace
+# Use ubi8/go-toolset as base image
+FROM registry.access.redhat.com/ubi8/go-toolset:1.20 as builder
+
+## Build args to be used at this step
+ARG SOURCE_CODE
+
+# Set building workdir
+WORKDIR /opt/rhods
 
 # Copy the Go Modules manifests
-COPY notebook-controller /workspace/notebook-controller
-COPY odh-notebook-controller /workspace/odh-notebook-controller
+COPY ${SOURCE_CODE}/notebook-controller ./notebook-controller
+COPY ${SOURCE_CODE}/odh-notebook-controller ./odh-notebook-controller
 
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
-RUN cd /workspace/odh-notebook-controller && go mod download all
+# Update building workdir
+WORKDIR /opt/rhods/odh-notebook-controller
 
-WORKDIR /workspace/odh-notebook-controller
+## Build the odh-notebook-controller
+USER root
 
-# Build
-RUN if [ "$(uname -m)" = "aarch64" ]; then \
-        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GO111MODULE=on go build -a -mod=mod -o manager main.go; \
+RUN if [ -z ${CACHITO_ENV_FILE} ]; then \
+       go mod download; \
     else \
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -mod=mod -o manager main.go; \
+       source ${CACHITO_ENV_FILE}; \
     fi
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/base:debug
-WORKDIR /
-COPY --from=builder /workspace/odh-notebook-controller/manager .
-COPY --from=builder /workspace/odh-notebook-controller/third_party/license.txt third_party/license.txt
-COPY --from=builder /go/pkg/mod/github.com/hashicorp third_party/hashicorp
-ENTRYPOINT ["/manager"]
+RUN go build \
+        -o ./bin/manager main.go
+
+# Use ubi8/ubi-minimal as base image
+FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
+
+## Build args to be used at this step
+ARG CI_CONTAINER_VERSION
+
+## Install additional packages
+RUN microdnf install -y shadow-utils &&\
+    microdnf clean all
+
+## Create a non-root user with UID 1001
+RUN useradd --uid 1001 --create-home --user-group --system rhods
+
+## Set workdir directory to user home
+WORKDIR /home/rhods
+
+## Copy odh-notebook-controller-manager binary from builder stage
+COPY --from=builder \
+      /opt/rhods/odh-notebook-controller/bin/manager \
+      /manager
+
+## Switch to a non-root user
+USER rhods
+
+ENTRYPOINT [ "/manager" ]
