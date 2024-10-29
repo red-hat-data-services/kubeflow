@@ -1,0 +1,91 @@
+---
+name: Code static analysis
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  golangci:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - components/notebook-controller
+          - components/odh-notebook-controller
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          check-latest: true
+          go-version-file: ${{ matrix.component }}/go.mod
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+
+      - name: golangci-lint
+        if: "${{ !cancelled() }}"
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: --timeout=5m
+          version: v1.59.1
+          only-new-issues: true
+          working-directory: ${{ matrix.component }}
+
+      # additional checks not part of golangci-lint
+
+      # https://github.com/golangci/golangci-lint/issues/4123
+      - name: go mod verify
+        if: "${{ !cancelled() }}"
+        run: go mod verify
+        working-directory: ${{ matrix.component }}
+
+      # https://github.com/golang/go/issues/27005
+      - name: go mod tidy -diff
+        if: "${{ !cancelled() }}"
+        run: |
+          set -x
+
+          go mod tidy
+
+          # if the above changed any files, report the differences and fail the step
+          if [[ $(git ls-files . -d -m -o --exclude-standard --full-name -v | wc -l) -gt 0 ]]; then
+            echo "There are changes:"
+            git diff
+            exit 1
+          fi
+        working-directory: ${{ matrix.component }}
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - components/notebook-controller
+          - components/odh-notebook-controller
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # latest govulncheck works with the latest stable go version
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: ${{ matrix.component }}/go.sum
+
+      # https://go.googlesource.com/vuln
+      - name: govulncheck
+        if: "${{ !cancelled() }}"
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go mod tidy
+          $(go env GOPATH)/bin/govulncheck ./...
+        working-directory: ${{ matrix.component }}
