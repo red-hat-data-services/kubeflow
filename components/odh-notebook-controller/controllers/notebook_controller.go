@@ -21,8 +21,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	netv1 "k8s.io/api/networking/v1"
@@ -32,6 +34,7 @@ import (
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,6 +70,8 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // CompareNotebooks checks if two notebooks are equal, if not return false.
 func CompareNotebooks(nb1 nbv1.Notebook, nb2 nbv1.Notebook) bool {
@@ -182,6 +187,15 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	err = r.ReconcileAllNetworkPolicies(notebook, ctx)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Call the Rolebinding reconciler
+	if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_RBAC"))) == "true" {
+		err = r.ReconcileRoleBindings(notebook, ctx)
+		if err != nil {
+			log.Error(err, "Unable to Reconcile Rolebinding")
+			return ctrl.Result{}, err
+		}
 	}
 
 	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
@@ -445,6 +459,7 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
 		Owns(&netv1.NetworkPolicy{}).
+		Owns(&rbacv1.RoleBinding{}).
 
 		// Watch for all the required ConfigMaps
 		// odh-trusted-ca-bundle, kube-root-ca.crt, workbench-trusted-ca-bundle

@@ -265,13 +265,17 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
-			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
-		}
-		err = InjectOAuthProxy(notebook, w.OAuthConfig)
-		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
+	if OAuthInjectionIsEnabled(notebook.ObjectMeta) && ServiceMeshIsEnabled(notebook.ObjectMeta) {
+		return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
+	}
+	// RHOAIENG-14552: Updating oauth-proxy in a running notebook may lead to notebook restart. Updating only
+	// on Create is safe as it cannot cause a restart in already running notebook when oauth-proxy image changes.
+	if req.Operation == admissionv1.Create {
+		if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+			err = InjectOAuthProxy(notebook, w.OAuthConfig)
+			if err != nil {
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
 		}
 	}
 

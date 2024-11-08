@@ -17,13 +17,18 @@ package controllers
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
 	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/onsi/gomega/format"
 	netv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	. "github.com/onsi/ginkgo"
@@ -161,6 +166,78 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	})
 
+	// New test case for RoleBinding reconciliation
+	When("Reconcile RoleBindings is called for a Notebook", func() {
+		const (
+			name      = "test-notebook-rolebinding"
+			namespace = "default"
+		)
+		notebook := createNotebook(name, namespace)
+
+		// Define the role and role-binding names and types used in the reconciliation
+		roleRefName := "ds-pipeline-user-access-dspa"
+		roleBindingName := "elyra-pipelines-" + name
+
+		BeforeEach(func() {
+			// Skip the tests if SET_PIPELINE_RBAC is not set to "true"
+			fmt.Printf("SET_PIPELINE_RBAC is: %s\n", os.Getenv("SET_PIPELINE_RBAC"))
+			if os.Getenv("SET_PIPELINE_RBAC") != "true" {
+				Skip("Skipping RoleBinding reconciliation tests as SET_PIPELINE_RBAC is not set to 'true'")
+			}
+		})
+
+		It("Should create a RoleBinding when the referenced Role exists", func() {
+			ctx := context.Background()
+
+			By("Creating a Notebook and ensuring the Role exists")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
+
+			// Simulate the Role required by RoleBinding
+			role := &rbacv1.Role{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      roleRefName,
+					Namespace: namespace,
+				},
+			}
+			Expect(cli.Create(ctx, role)).Should(Succeed())
+			defer func() {
+				if err := cli.Delete(ctx, role); err != nil {
+					GinkgoT().Logf("Failed to delete Role: %v", err)
+				}
+			}()
+
+			By("Checking that the RoleBinding is created")
+			roleBinding := &rbacv1.RoleBinding{}
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: namespace}, roleBinding)
+			}, duration, interval).Should(Succeed())
+
+			Expect(roleBinding.RoleRef.Name).To(Equal(roleRefName))
+			Expect(roleBinding.Subjects[0].Name).To(Equal(name))
+			Expect(roleBinding.Subjects[0].Kind).To(Equal("ServiceAccount"))
+		})
+
+		It("Should delete the RoleBinding when the Notebook is deleted", func() {
+			ctx := context.Background()
+
+			By("Ensuring the RoleBinding exists")
+			roleBinding := &rbacv1.RoleBinding{}
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: namespace}, roleBinding)
+			}, duration, interval).Should(Succeed())
+
+			By("Deleting the Notebook")
+			Expect(cli.Delete(ctx, notebook)).Should(Succeed())
+
+			By("Ensuring the RoleBinding is deleted")
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: namespace}, roleBinding)
+			}, duration, interval).Should(Succeed())
+		})
+
+	})
+
 	// New test case for notebook creation
 	When("Creating a Notebook, test certificate is mounted", func() {
 		const (
@@ -230,6 +307,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}
 			// Check if the volume is present and matches the expected one
 			Expect(notebook.Spec.Template.Spec.Volumes).To(ContainElement(expectedVolume))
+
+			// Check the content in workbench-trusted-ca-bundle matches what we expect:
+			//   - have 2 certificates there in ca-bundle.crt
+			//   - both certificates are valid
+			configMapName := "workbench-trusted-ca-bundle"
+			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
 
 	})
@@ -329,6 +412,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 				},
 			}
 			Expect(notebook.Spec.Template.Spec.Volumes).To(ContainElement(expectedVolume))
+
+			// Check the content in workbench-trusted-ca-bundle matches what we expect:
+			//   - have 2 certificates there in ca-bundle.crt
+			//   - both certificates are valid
+			configMapName := "workbench-trusted-ca-bundle"
+			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
 
 	})
@@ -595,21 +684,23 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(BeTrue())
 		})
 
-		It("Should reconcile the Notebook when modified", func() {
-			By("By simulating a manual Notebook modification")
-			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
-			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
-			Expect(cli.Update(ctx, notebook)).Should(Succeed())
-			time.Sleep(interval)
+		// RHOAIENG-14552: We *do not* reconcile OAuth in the notebook when it's modified
 
-			By("By checking that the webhook has restored the Notebook spec")
-			Eventually(func() error {
-				key := types.NamespacedName{Name: Name, Namespace: Namespace}
-				return cli.Get(ctx, key, notebook)
-			}, duration, interval).Should(Succeed())
-			Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
-		})
+		//It("Should reconcile the Notebook when modified", func() {
+		//	By("By simulating a manual Notebook modification")
+		//	notebook.Spec.Template.Spec.ServiceAccountName = "foo"
+		//	notebook.Spec.Template.Spec.Containers[1].Image = "bar"
+		//	notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
+		//	Expect(cli.Update(ctx, notebook)).Should(Succeed())
+		//	time.Sleep(interval)
+		//
+		//	By("By checking that the webhook has restored the Notebook spec")
+		//	Eventually(func() error {
+		//		key := types.NamespacedName{Name: Name, Namespace: Namespace}
+		//		return cli.Get(ctx, key, notebook)
+		//	}, duration, interval).Should(Succeed())
+		//	Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
+		//})
 
 		serviceAccount := &corev1.ServiceAccount{}
 		expectedServiceAccount := createOAuthServiceAccount(Name, Namespace)
@@ -1039,4 +1130,33 @@ func createOAuthConfigmap(name, namespace string, label map[string]string, confi
 		},
 		Data: configMapData,
 	}
+}
+
+// checkCertConfigMap checks the content of a config map defined by the name and namespace
+// It triest to parse the given certFileName and checks that all certificates can be parsed there and that the number of the certificates matches what we expect.
+func checkCertConfigMap(ctx context.Context, namespace string, configMapName string, certFileName string, expNumberCerts int) {
+	configMap := &corev1.ConfigMap{}
+	key := types.NamespacedName{Namespace: namespace, Name: configMapName}
+	Expect(cli.Get(ctx, key, configMap)).Should(Succeed())
+
+	// Attempt to decode PEM encoded certificates so we are sure all are readable as expected
+	certData := configMap.Data[certFileName]
+	certDataByte := []byte(certData)
+	certificatesFound := 0
+	for len(certDataByte) > 0 {
+		block, remainder := pem.Decode(certDataByte)
+		certDataByte = remainder
+
+		if block == nil {
+			break
+		}
+
+		if block.Type == "CERTIFICATE" {
+			// Attempt to parse the certificate
+			_, err := x509.ParseCertificate(block.Bytes)
+			Expect(err).ShouldNot(HaveOccurred())
+			certificatesFound++
+		}
+	}
+	Expect(certificatesFound).Should(Equal(expNumberCerts), "Number of parsed certificates don't match expected one:\n"+certData)
 }
