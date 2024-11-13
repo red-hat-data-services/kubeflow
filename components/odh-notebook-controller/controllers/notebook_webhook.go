@@ -28,6 +28,7 @@ import (
 	"github.com/kubeflow/kubeflow/components/notebook-controller/pkg/culler"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -232,6 +233,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	// Initialize logger format
 	log := w.Log.WithValues("notebook", req.Name, "namespace", req.Namespace)
+	ctx = logr.NewContext(ctx, log)
 
 	notebook := &nbv1.Notebook{}
 
@@ -265,22 +267,31 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
-	if OAuthInjectionIsEnabled(notebook.ObjectMeta) && ServiceMeshIsEnabled(notebook.ObjectMeta) {
-		return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
-	}
-	// RHOAIENG-14552: Updating oauth-proxy in a running notebook may lead to notebook restart. Updating only
-	// on Create is safe as it cannot cause a restart in already running notebook when oauth-proxy image changes.
-	if req.Operation == admissionv1.Create {
-		if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-			err = InjectOAuthProxy(notebook, w.OAuthConfig)
-			if err != nil {
-				return admission.Errored(http.StatusInternalServerError, err)
-			}
+	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
+			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
+		}
+		err = InjectOAuthProxy(notebook, w.OAuthConfig)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
 		}
 	}
 
+	// RHOAIENG-14552: Running notebook cannot be updated carelessly, or we may end up restarting the pod when
+	// the webhook runs after e.g. the oauth-proxy image has been updated
+	mutatedNotebook, needsRestart, err := w.maybeRestartRunningNotebook(ctx, req, notebook)
+	if err != nil {
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	updatePendingAnnotation := "notebooks.opendatahub.io/update-pending"
+	if needsRestart != NoPendingUpdates {
+		mutatedNotebook.ObjectMeta.Annotations[updatePendingAnnotation] = needsRestart.Reason
+	} else {
+		delete(mutatedNotebook.ObjectMeta.Annotations, updatePendingAnnotation)
+	}
+
 	// Create the mutated notebook object
-	marshaledNotebook, err := json.Marshal(notebook)
+	marshaledNotebook, err := json.Marshal(mutatedNotebook)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
@@ -292,6 +303,68 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
 	w.Decoder = d
 	return nil
+}
+
+// maybeRestartRunningNotebook evaluates whether the updates being made cause notebook pod to restart.
+// If the restart is caused by updates made by the mutating webhook itself to already existing notebook,
+// and the notebook is not stopped, then these updates will be blocked until the notebook is stopped.
+// Returns the mutated notebook, a flag whether there's a pending restart (to apply blocked updates), and an error value.
+func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req admission.Request, mutatedNotebook *nbv1.Notebook) (*nbv1.Notebook, *UpdatesPending, error) {
+	var err error
+	log := logr.FromContextOrDiscard(ctx)
+
+	// Notebook that was just created can be updated
+	if req.Operation == admissionv1.Create {
+		log.Info("Not blocking update, notebook is being newly created")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// Stopped notebooks are ok to update
+	if metav1.HasAnnotation(mutatedNotebook.ObjectMeta, "kubeflow-resource-stopped") {
+		log.Info("Not blocking update, notebook is (to be) stopped")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// Restarting notebooks are also ok to update
+	if metav1.HasAnnotation(mutatedNotebook.ObjectMeta, "notebooks.opendatahub.io/notebook-restart") {
+		log.Info("Not blocking update, notebook is (to be) restarted")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// fetch the updated Notebook CR that was sent to the Webhook
+	updatedNotebook := &nbv1.Notebook{}
+	err = w.Decoder.Decode(req, updatedNotebook)
+	if err != nil {
+		log.Error(err, "Failed to fetch the updated Notebook CR")
+		return nil, NoPendingUpdates, err
+	}
+
+	// fetch the original Notebook CR
+	oldNotebook := &nbv1.Notebook{}
+	err = w.Decoder.DecodeRaw(req.OldObject, oldNotebook)
+	if err != nil {
+		log.Error(err, "Failed to fetch the original Notebook CR")
+		return nil, NoPendingUpdates, err
+	}
+
+	// The externally issued update already causes a restart, so we will just let all changes proceed
+	if !equality.Semantic.DeepEqual(oldNotebook.Spec.Template.Spec, updatedNotebook.Spec.Template.Spec) {
+		log.Info("Not blocking update, the externally issued update already modifies pod template, causing a restart")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// Nothing about the Pod definition is actually changing and we can proceed
+	if equality.Semantic.DeepEqual(oldNotebook.Spec.Template.Spec, mutatedNotebook.Spec.Template.Spec) {
+		log.Info("Not blocking update, the pod template is not being modified at all")
+		return mutatedNotebook, NoPendingUpdates, nil
+	}
+
+	// Now we know we have to block the update
+	// Keep the old values and mark the Notebook as UpdatesPending
+	diff := getStructDiff(ctx, mutatedNotebook.Spec.Template.Spec, updatedNotebook.Spec.Template.Spec)
+	log.Info("Update blocked, notebook pod template would be changed by the webhook", "diff", diff)
+	mutatedNotebook.Spec.Template.Spec = updatedNotebook.Spec.Template.Spec
+	return mutatedNotebook, &UpdatesPending{Reason: diff}, nil
 }
 
 // CheckAndMountCACertBundle checks if the odh-trusted-ca-bundle ConfigMap is present

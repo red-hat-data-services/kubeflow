@@ -4,12 +4,12 @@ IMG ?= quay.io/opendatahub/odh-notebook-controller
 TAG ?= $(shell git describe --tags --always)
 
 KF_IMG ?= quay.io/opendatahub/kubeflow-notebook-controller
-KF_TAG ?= 1.9-8369940
+KF_TAG ?= main-3f931d2
 
 CONTAINER_ENGINE ?= podman
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.23
+ENVTEST_K8S_VERSION = 1.26
 
 # Kubernetes configuration
 K8S_NAMESPACE ?= odh-notebook-controller-system
@@ -241,7 +241,7 @@ controller-gen: ## Download controller-gen locally if necessary.
 KUSTOMIZE = $(LOCALBIN)/kustomize
 .PHONY: kustomize
 kustomize: ## Download kustomize locally if necessary.
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/v3/cmd/kustomize@v5.0.2
+	GOBIN=$(LOCALBIN) go install sigs.k8s.io/kustomize/kustomize/v5@v5.0.2
 
 ENVTEST = $(LOCALBIN)/setup-envtest
 .PHONY: envtest

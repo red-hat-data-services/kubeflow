@@ -684,23 +684,21 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			}, duration, interval).Should(BeTrue())
 		})
 
-		// RHOAIENG-14552: We *do not* reconcile OAuth in the notebook when it's modified
+		It("Should reconcile the Notebook when modified", func() {
+			By("By simulating a manual Notebook modification")
+			notebook.Spec.Template.Spec.ServiceAccountName = "foo"
+			notebook.Spec.Template.Spec.Containers[1].Image = "bar"
+			notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
+			Expect(cli.Update(ctx, notebook)).Should(Succeed())
+			time.Sleep(interval)
 
-		//It("Should reconcile the Notebook when modified", func() {
-		//	By("By simulating a manual Notebook modification")
-		//	notebook.Spec.Template.Spec.ServiceAccountName = "foo"
-		//	notebook.Spec.Template.Spec.Containers[1].Image = "bar"
-		//	notebook.Spec.Template.Spec.Volumes[1].VolumeSource = corev1.VolumeSource{}
-		//	Expect(cli.Update(ctx, notebook)).Should(Succeed())
-		//	time.Sleep(interval)
-		//
-		//	By("By checking that the webhook has restored the Notebook spec")
-		//	Eventually(func() error {
-		//		key := types.NamespacedName{Name: Name, Namespace: Namespace}
-		//		return cli.Get(ctx, key, notebook)
-		//	}, duration, interval).Should(Succeed())
-		//	Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
-		//})
+			By("By checking that the webhook has restored the Notebook spec")
+			Eventually(func() error {
+				key := types.NamespacedName{Name: Name, Namespace: Namespace}
+				return cli.Get(ctx, key, notebook)
+			}, duration, interval).Should(Succeed())
+			Expect(CompareNotebooks(*notebook, expectedNotebook)).Should(BeTrue())
+		})
 
 		serviceAccount := &corev1.ServiceAccount{}
 		expectedServiceAccount := createOAuthServiceAccount(Name, Namespace)
