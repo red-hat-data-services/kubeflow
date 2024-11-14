@@ -2,7 +2,7 @@
 ARG SOURCE_CODE=.
 
 # Use ubi8/go-toolset as base image
-FROM registry.access.redhat.com/ubi8/go-toolset@sha256:4ec05fd5b355106cc0d990021a05b71bbfb9231e4f5bdc0c5316515edf6a1c96 as builder
+FROM registry.access.redhat.com/ubi8/go-toolset@sha256:bd2057262d0876188976f79d2246717994de9e03dd589b1e6471dd2b2777204f as builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -49,7 +49,6 @@ LABEL com.redhat.component="odh-kf-notebook-controller-container" \
       summary="odh-kf-notebook-controller" \
       maintainer="['managed-open-data-hub@redhat.com']" \
       io.openshift.expose-services="" \
-      io.openshift.tags="" \
       io.k8s.display-name="odh-kf-notebook-controller" \
       io.k8s.description="odh-kf-notebook-controller" \
       com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
