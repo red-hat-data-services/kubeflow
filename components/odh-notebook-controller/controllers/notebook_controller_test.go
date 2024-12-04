@@ -419,7 +419,6 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			configMapName := "workbench-trusted-ca-bundle"
 			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
 		})
-
 	})
 
 	When("Creating a Notebook, test Networkpolicies", func() {

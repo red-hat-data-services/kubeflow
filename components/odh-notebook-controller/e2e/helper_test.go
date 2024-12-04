@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	netv1 "k8s.io/api/networking/v1"
-
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	appsv1 "k8s.io/api/apps/v1"
