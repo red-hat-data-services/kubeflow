@@ -1,0 +1,55 @@
+# Build arguments
+ARG SOURCE_CODE=.
+
+# Use ubi8/go-toolset as base image
+FROM registry.access.redhat.com/ubi8/go-toolset:1.21@sha256:742ae6ec1aef3e7faae488c47695fb64964d342aefecf52d23bd9d5e6731d0b6 as builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+## Build args to be used at this step
+ARG SOURCE_CODE
+
+WORKDIR /opt/rhods
+# Copy the Go Modules manifests
+COPY ${SOURCE_CODE}/notebook-controller ./notebook-controller
+COPY ${SOURCE_CODE}/odh-notebook-controller ./odh-notebook-controller
+
+WORKDIR /opt/rhods/odh-notebook-controller
+
+## Build the odh-notebook-controller
+USER root
+
+# Build
+RUN go build -o ./bin/manager main.go
+
+# Use ubi8/ubi-minimal as base image
+FROM registry.redhat.io/ubi8/ubi-minimal@sha256:cf095e5668919ba1b4ace3888107684ad9d587b1830d3eb56973e6a54f456e67
+
+## Install additional packages
+RUN microdnf install -y shadow-utils &&\
+    microdnf clean all
+
+## Create a non-root user with UID 1001
+RUN useradd --uid 1001 --create-home --user-group --system rhods
+
+## Set workdir directory to user home
+WORKDIR /home/rhods
+
+## Copy odh-notebook-controller-manager binary from builder stage
+COPY --from=builder /opt/rhods/odh-notebook-controller/bin/manager /manager
+
+## Switch to a non-root user
+USER 1001:0
+
+ENTRYPOINT [ "/manager" ]
+
+LABEL com.redhat.component="odh-kf-notebook-controller-container" \
+      name="managed-open-data-hub/odh-kf-notebook-controller-rhel8" \
+      description="odh-kf-notebook-controller" \
+      summary="odh-kf-notebook-controller" \
+      maintainer="['managed-open-data-hub@redhat.com']" \
+      io.openshift.expose-services="" \
+      io.k8s.display-name="odh-kf-notebook-controller" \
+      io.k8s.description="odh-kf-notebook-controller" \
+      com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
