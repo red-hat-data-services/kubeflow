@@ -1,1 +1,1 @@
-KF_TAG ?= 1.9-743c9ca
+KF_TAG ?= 1.9-25b27fd
