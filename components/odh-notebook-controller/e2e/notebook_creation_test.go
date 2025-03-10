@@ -133,13 +133,13 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 	}
 
 	if deploymentMode == OAuthProxy {
-		return tc.ensureOAuthNetworkPolicyExists(nbMeta, err)
+		return tc.ensureOAuthNetworkPolicyExists(nbMeta)
 	}
 
 	return nil
 }
 
-func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta, err error) error {
+func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {
 	// Test Notebook Network policy that allows all requests on Notebook OAuth port
 	notebookOAuthNetworkPolicy, err := tc.getNotebookNetworkPolicy(nbMeta, nbMeta.Name+"-oauth-np")
 	if err != nil {

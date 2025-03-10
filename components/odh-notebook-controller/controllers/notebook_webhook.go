@@ -30,13 +30,14 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -190,7 +191,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-oauth-config",
-				DefaultMode: pointer.Int32Ptr(420),
+				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
@@ -213,7 +214,7 @@ func InjectOAuthProxy(notebook *nbv1.Notebook, oauth OAuthConfig) error {
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  notebook.Name + "-tls",
-				DefaultMode: pointer.Int32Ptr(420),
+				DefaultMode: ptr.To[int32](420),
 			},
 		},
 	}
@@ -531,7 +532,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: configMapName,
 				},
-				Optional: pointer.Bool(true),
+				Optional: ptr.To(true),
 				Items: []corev1.KeyToPath{{
 					Key:  configMapMountKey,
 					Path: configMapMountValue,
@@ -630,12 +631,6 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 		log.Error(err, "Error creating dynamic client")
 		return err
 	}
-	// Specify the GroupVersionResource for imagestreams
-	ims := schema.GroupVersionResource{
-		Group:    "image.openshift.io",
-		Version:  "v1",
-		Resource: "imagestreams",
-	}
 
 	annotations := notebook.GetAnnotations()
 	if annotations != nil {
@@ -652,35 +647,46 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 					if strings.Contains(container.Image, "image-registry.openshift-image-registry.svc:5000") {
 						log.Info("Internal registry found. Will pick up the default value from image field.")
 						return nil
-					} else {
-						log.Info("No internal registry found, let's pick up image reference from relevant ImageStream 'status.tags[].tag.dockerImageReference'")
+					}
+					log.Info("No internal registry found, let's pick up image reference from relevant ImageStream 'status.tags[].tag.dockerImageReference'")
 
-						// Split the imageSelection to imagestream and tag
-						imageSelected := strings.Split(imageSelection, ":")
-						if len(imageSelected) != 2 {
-							log.Error(nil, "Invalid image selection format")
-							return fmt.Errorf("invalid image selection format")
+					// Split the imageSelection to imagestream and tag
+					imageSelected := strings.Split(imageSelection, ":")
+					if len(imageSelected) != 2 {
+						return fmt.Errorf("invalid image selection format")
+					}
+
+					// Specify the GroupVersionResource for imagestreams
+					ims := schema.GroupVersionResource{
+						Group:    "image.openshift.io",
+						Version:  "v1",
+						Resource: "imagestreams",
+					}
+
+					imagestreamFound := false
+					// List imagestreams in the specified namespace
+					imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
+					if err != nil {
+						if k8serr.IsForbidden(err) {
+							log.Info("Permission denied to list imagestreams", "namespace", namespace, "error", err)
+							// fast exit on permission denied
+							return err
 						}
+						log.Info("Cannot list imagestreams", "namespace", namespace, "error", err)
+						continue
+					}
 
-						imagestreamFound := false
-						// List imagestreams in the specified namespace
-						imagestreams, err := dynamicClient.Resource(ims).Namespace(namespace).List(ctx, metav1.ListOptions{})
-						if err != nil {
-							log.Info("Cannot list imagestreams", "error", err)
-							continue
-						}
+					// Iterate through the imagestreams to find matches
+					for _, item := range imagestreams.Items {
+						metadata := item.Object["metadata"].(map[string]interface{})
+						name := metadata["name"].(string)
 
-						// Iterate through the imagestreams to find matches
-						for _, item := range imagestreams.Items {
-							metadata := item.Object["metadata"].(map[string]interface{})
-							name := metadata["name"].(string)
+						// Match with the ImageStream name
+						if name == imageSelected[0] {
+							status := item.Object["status"].(map[string]interface{})
 
-							// Match with the ImageStream name
-							if name == imageSelected[0] {
-								status := item.Object["status"].(map[string]interface{})
-
-								// Match to the corresponding tag of the image
-								tags := status["tags"].([]interface{})
+							// Match to the corresponding tag of the image
+							if tags, ok := status["tags"].([]interface{}); ok && tags != nil {
 								for _, t := range tags {
 									tagMap := t.(map[string]interface{})
 									tagName := tagMap["tag"].(string)
@@ -710,14 +716,14 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 								}
 							}
 						}
-						if !imagestreamFound {
-							log.Error(nil, "Imagestream not found in main controller namespace", "imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
-						}
+					}
+					if !imagestreamFound {
+						log.Error(nil, "Imagestream not found in main controller namespace", "imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
 					}
 				}
 			}
 			if !containerFound {
-				log.Error(nil, "No container found matching the notebook name", "notebookName", notebook.Name)
+				return fmt.Errorf("no container found matching the notebook name %s", notebook.Name)
 			}
 		}
 	}
