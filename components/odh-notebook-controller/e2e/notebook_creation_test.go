@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -85,8 +86,8 @@ func (tc *testContext) testNotebookCreation(nbContext notebookContext) error {
 	err := tc.customClient.Get(tc.ctx, notebookLookupKey, &createdNotebook)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			nberr := wait.Poll(tc.resourceRetryInterval, tc.resourceCreationTimeout, func() (done bool, err error) {
-				creationErr := tc.customClient.Create(tc.ctx, testNotebook)
+			nberr := wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+				creationErr := tc.customClient.Create(ctx, testNotebook)
 				if creationErr != nil {
 					log.Printf("Error creating Notebook resource %v: %v, trying again",
 						testNotebook.Name, creationErr)
