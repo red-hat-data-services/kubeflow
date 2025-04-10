@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - main
-      - v1.9-branch
+      - v1.10-branch
     paths:
       - .github/workflows/notebook_controller_unit_test.yaml
       - components/notebook-controller/**
@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Checkout
       uses: actions/checkout@v4
