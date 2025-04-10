@@ -19,10 +19,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	configv1 "github.com/openshift/api/config/v1"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	configv1 "github.com/openshift/api/config/v1"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -56,6 +62,16 @@ type NotebookWebhook struct {
 }
 
 var proxyEnvVars = make(map[string]string, 3)
+
+// https://github.com/open-telemetry/opentelemetry-go/pull/1674#issuecomment-793558199
+// https://github.com/open-telemetry/opentelemetry-go/issues/4291#issuecomment-1629797725
+var getWebhookTracer func() trace.Tracer = sync.OnceValue(func() trace.Tracer {
+	return otel.GetTracerProvider().Tracer("opendatahub.io/kubeflow/components/odh-notebook-controller/controllers/notebook_webhook.go")
+})
+
+const (
+	IMAGE_STREAM_NOT_FOUND_EVENT = "imagestream-not-found"
+)
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
 // stop annotation to explicitly start the notebook pod when the ODH notebook
@@ -264,6 +280,15 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	log := w.Log.WithValues("notebook", req.Name, "namespace", req.Namespace)
 	ctx = logr.NewContext(ctx, log)
 
+	// Initialize OpenTelemetry tracer.
+	// This is a noop in production code and is (so far) only used for testing.
+	ctx, span := getWebhookTracer().Start(ctx, "handleFunc", trace.WithNewRoot(), trace.WithAttributes(
+		attribute.String("notebook", req.Name),
+		attribute.String("namespace", req.Namespace),
+		attribute.String("operation", string(req.Operation)),
+	))
+	defer span.End()
+
 	notebook := &nbv1.Notebook{}
 
 	err := w.Decoder.Decode(req, notebook)
@@ -290,6 +315,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 		// Mount ca bundle on notebook creation and update
 		err = CheckAndMountCACertBundle(ctx, w.Client, notebook, log)
+		if err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		// Mount ConfigMap pipeline-runtime-images as runtime-images
+		err = MountPipelineRuntimeImages(ctx, w.Client, notebook, log)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
@@ -349,6 +380,9 @@ func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
 func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req admission.Request, mutatedNotebook *nbv1.Notebook) (*nbv1.Notebook, *UpdatesPending, error) {
 	var err error
 	log := logr.FromContextOrDiscard(ctx)
+
+	ctx, span := getWebhookTracer().Start(ctx, "maybeRestartRunningNotebook")
+	defer span.End()
 
 	// Notebook that was just created can be updated
 	if req.Operation == admissionv1.Create {
@@ -625,6 +659,8 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 // Otherwise, it checks the last-image-selection annotation to find the image stream and fetches the image from status.dockerImageReference,
 // assigning it to the container.image value.
 func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, notebook *nbv1.Notebook, log logr.Logger, namespace string) error {
+	span := trace.SpanFromContext(ctx)
+
 	// Create a dynamic client
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -717,6 +753,7 @@ func SetContainerImageFromRegistry(ctx context.Context, config *rest.Config, not
 						}
 					}
 					if !imagestreamFound {
+						span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
 						log.Error(nil, "ImageStream not found in main controller namespace, or the ImageStream is present but does not contain a dockerImageReference for the specified tag",
 							"imageSelected", imageSelected[0], "tag", imageSelected[1], "namespace", namespace)
 					}
