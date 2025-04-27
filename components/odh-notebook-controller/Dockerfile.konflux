@@ -26,10 +26,6 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GOEXPERIMENT=stri
 # Use ubi8/ubi-minimal as base image
 FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:ac61c96b93894b9169221e87718733354dd3765dd4a62b275893c7ff0d876869
 
-## Install additional packages
-RUN microdnf install -y shadow-utils &&\
-    microdnf clean all
-
 ## Create a non-root user with UID 1001
 RUN useradd --uid 1001 --create-home --user-group --system rhods
 
