@@ -215,7 +215,7 @@ var _ = Describe("The Openshift Notebook webhook", func() {
 							}}}},
 					},
 				},
-				// there is no update to the Notebook
+				// valid new image is picked from user namespace.
 				expectedImage: "quay.io/modh/odh-generic-data-science-notebook@sha256:5999547f847ca841fe067ff84e2972d2cbae598066c2418e236448e115c1728e",
 				unexpectedEvents: []string{
 					IMAGE_STREAM_NOT_FOUND_EVENT,
