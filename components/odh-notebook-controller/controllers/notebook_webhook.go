@@ -732,6 +732,7 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 						err = cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: notebook.Namespace}, imgSelection)
 						if err != nil {
 							log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
+							span.AddEvent(IMAGE_STREAM_NOT_FOUND_EVENT)
 						} else {
 							// ImageStream found in the notebook namespace
 							imagestreamFound = true
