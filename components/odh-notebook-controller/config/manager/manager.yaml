@@ -21,7 +21,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: manager
-          image: $(odh-notebook-controller-image)
+          image: odh-notebook-controller-image_PLACEHOLDER
           imagePullPolicy: Always
           command:
             - /manager
@@ -56,4 +56,4 @@ spec:
               memory: 256Mi
           env:
             - name: SET_PIPELINE_RBAC
-              value: "false"
+              value: "true"

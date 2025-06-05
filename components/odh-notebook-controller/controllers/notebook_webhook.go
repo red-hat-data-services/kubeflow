@@ -726,7 +726,7 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 					// if not found, search in the notebook namespace
 					// Note: This is in this order, so users should not overwrite the ImageStream
 					err := cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: controllerNamespace}, imgSelection)
-					if err != nil && apierrs.IsNotFound(err) {
+					if apierrs.IsNotFound(err) {
 						log.Info("Unable to find the ImageStream in controller namespace, try finding in notebook namespace", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
 						// Check if the ImageStream is present in the notebook namespace
 						err = cli.Get(ctx, types.NamespacedName{Name: imagestreamName, Namespace: notebook.Namespace}, imgSelection)
@@ -738,6 +738,8 @@ func SetContainerImageFromRegistry(ctx context.Context, cli client.Client, noteb
 							imagestreamFound = true
 							log.Info("ImageStream found in notebook namespace", "imagestream", imagestreamName, "namespace", notebook.Namespace)
 						}
+					} else if err != nil {
+						log.Error(err, "Error getting ImageStream", "imagestream", imagestreamName, "controllerNamespace", controllerNamespace)
 					} else {
 						// ImageStream found in the controller namespace
 						imagestreamFound = true
