@@ -56,6 +56,12 @@ const (
 	AnnotationLogoutUrl               = "notebooks.opendatahub.io/oauth-logout-url"
 )
 
+const (
+	OdhConfigMapName        = "odh-trusted-ca-bundle"    // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
+	SelfSignedConfigMapName = "kube-root-ca.crt"         // Self-Signed Certs Contains ca.crt
+	ServiceCAConfigMapName  = "openshift-service-ca.crt" // Service CA Bundle Contains service-ca.crt
+)
+
 // OpenshiftNotebookReconciler holds the controller configuration.
 type OpenshiftNotebookReconciler struct {
 	client.Client
@@ -285,14 +291,13 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	rootCertPool := [][]byte{}                    // Root certificate pool
-	odhConfigMapName := "odh-trusted-ca-bundle"   // Use ODH Trusted CA Bundle Contains ca-bundle.crt and odh-ca-bundle.crt
-	selfSignedConfigMapName := "kube-root-ca.crt" // Self-Signed Certs Contains ca.crt
+	rootCertPool := [][]byte{} // Root certificate pool
 
-	configMapList := []string{odhConfigMapName, selfSignedConfigMapName}
+	configMapList := []string{OdhConfigMapName, SelfSignedConfigMapName, ServiceCAConfigMapName}
 	configMapFileNames := map[string][]string{
-		odhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
-		selfSignedConfigMapName: {"ca.crt"},
+		OdhConfigMapName:        {"ca-bundle.crt", "odh-ca-bundle.crt"},
+		SelfSignedConfigMapName: {"ca.crt"},
+		ServiceCAConfigMapName:  {"service-ca.crt"},
 	}
 
 	for _, configMapName := range configMapList {
@@ -301,7 +306,7 @@ func (r *OpenshiftNotebookReconciler) CreateNotebookCertConfigMap(notebook *nbv1
 		if err := r.Get(ctx, client.ObjectKey{Namespace: notebook.Namespace, Name: configMapName}, configMap); err != nil {
 			// if configmap odh-trusted-ca-bundle is not found,
 			// no need to create the workbench-trusted-ca-bundle
-			if apierrs.IsNotFound(err) && configMapName == odhConfigMapName {
+			if apierrs.IsNotFound(err) && configMapName == OdhConfigMapName {
 				return nil
 			}
 			log.Info("Unable to fetch ConfigMap", "configMap", configMapName)
@@ -500,9 +505,9 @@ func (r *OpenshiftNotebookReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, o client.Object) []reconcile.Request {
 				log := r.Log.WithValues("namespace", o.GetNamespace(), "name", o.GetName())
 
-				// If the ConfigMap is odh-trusted-ca-bundle or kube-root-ca.crt
+				// If the ConfigMap name matches on of our interested ConfigMaps
 				// trigger a reconcile event for first notebook in the namespace
-				if o.GetName() == "odh-trusted-ca-bundle" {
+				if o.GetName() == OdhConfigMapName || o.GetName() == SelfSignedConfigMapName || o.GetName() == ServiceCAConfigMapName {
 					// List all the notebooks in the namespace and trigger a reconcile event
 					var nbList nbv1.NotebookList
 					if err := r.List(ctx, &nbList, client.InNamespace(o.GetNamespace())); err != nil {
