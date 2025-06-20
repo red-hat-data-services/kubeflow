@@ -263,11 +263,29 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					"odh-ca-bundle.crt": "-----BEGIN CERTIFICATE-----\nMIGrMF+gAwIBAgIBATAFBgMrZXAwADAeFw0yNDExMTMyMzI2NTlaFw0yNTExMTMy\nMzI2NTlaMAAwKjAFBgMrZXADIQB/v02zcoIIcuan/8bd7cvrBuCGTuVZBrYr1RdA\n0k58yzAFBgMrZXADQQBKsL1tkpOZ6NW+zEX3mD7bhmhxtODQHnANMXEXs0aljWrm\nAxDrLdmzsRRYFYxe23OdXhWqPs8SfO8EZWEvXoME\n-----END CERTIFICATE-----",
 				})
 
+			serviceCACertBundle := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openshift-service-ca.crt",
+					Namespace: "default",
+					// Annotations: map[string]string{
+					// 	"service.beta.openshift.io/inject-cabundle": "true",
+					// },
+				},
+				Data: map[string]string{
+					"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBATCBtKADAgECAgEBMAUGAytlcDAAMB4XDTI1MDYxNjE2MTg0MVoXDTI2MDYx\nNjE2MTg0MVowADAqMAUGAytlcAMhAP7g8UxhoFPZXQiy4sSbOsLrlXq2RgFTzQOD\nj8O8e9qmo1MwUTAdBgNVHQ4EFgQUTCWpJDtMDVadBlVpkVTiLnCihqMwHwYDVR0j\nBBgwFoAUTCWpJDtMDVadBlVpkVTiLnCihqMwDwYDVR0TAQH/BAUwAwEB/zAFBgMr\nZXADQQDKpiapbn7ub7/hT7Whad9wbvIY8wXrWojgZXXbWaMQFV8i8GW7QN4w/C1p\nB8i0efvecoLP/mqmXNyl7KgTnC4D\n-----END CERTIFICATE-----",
+				},
+			}
+
 			// Create the ConfigMap
 			Expect(cli.Create(ctx, trustedCACertBundle)).Should(Succeed())
+			Expect(cli.Create(ctx, serviceCACertBundle)).Should(Succeed())
 			defer func() {
 				// Clean up the ConfigMap after the test
 				if err := cli.Delete(ctx, trustedCACertBundle); err != nil {
+					// Log the error without failing the test
+					logger.Info("Error occurred during deletion of ConfigMap: %v", err)
+				}
+				if err := cli.Delete(ctx, serviceCACertBundle); err != nil {
 					// Log the error without failing the test
 					logger.Info("Error occurred during deletion of ConfigMap: %v", err)
 				}
@@ -308,12 +326,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(notebook.Spec.Template.Spec.Volumes).To(ContainElement(expectedVolume))
 
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
-			//   - have 2 certificates there in ca-bundle.crt
-			//   - both certificates are valid
+			//   - have 3 certificates there in ca-bundle.crt
+			//   - all certificates are valid
 			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
 			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
-			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
+			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
 		})
 
 	})
@@ -537,12 +555,12 @@ var _ = Describe("The Openshift Notebook controller", func() {
 			Expect(notebook.Spec.Template.Spec.Volumes).To(ContainElement(expectedVolume))
 
 			// Check the content in workbench-trusted-ca-bundle matches what we expect:
-			//   - have 2 certificates there in ca-bundle.crt
-			//   - both certificates are valid
+			//   - have 3 certificates there in ca-bundle.crt
+			//   - all certificates are valid
 			// TODO(RHOAIENG-15907): adding sleep to reduce flakiness
 			time.Sleep(2 * time.Second)
 			configMapName := "workbench-trusted-ca-bundle"
-			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 2)
+			checkCertConfigMap(ctx, notebook.Namespace, configMapName, "ca-bundle.crt", 3)
 		})
 	})
 
