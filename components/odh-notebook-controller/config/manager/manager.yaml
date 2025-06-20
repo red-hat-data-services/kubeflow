@@ -59,3 +59,10 @@ spec:
               value: "true"
             - name: SET_PIPELINE_SECRET
               value: "true"
+            - name: INJECT_CLUSTER_PROXY_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: notebook-controller-setting-config
+                  key: INJECT_CLUSTER_PROXY_ENV
+                  optional: true
+
