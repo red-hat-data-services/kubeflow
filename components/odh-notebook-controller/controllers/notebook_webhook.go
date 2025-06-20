@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -383,8 +384,17 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 	}
 
-	// If cluster-wide-proxy is enabled add environment variables
-	if w.ClusterWideProxyIsEnabled() {
+	// If cluster-wide-proxy is enabled, and INJECT_CLUSTER_PROXY_ENV is set to true,
+	// inject the environment variables.
+	// RHOAIENG-26099: This is a temporary solution to inject the proxy environment variables
+	// until the notebooks controller supports injecting the proxy environment variables
+	injectClusterProxy := false
+	if raw, ok := os.LookupEnv("INJECT_CLUSTER_PROXY_ENV"); ok {
+		if val, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+			injectClusterProxy = val
+		}
+	}
+	if w.ClusterWideProxyIsEnabled() && injectClusterProxy {
 		err = InjectProxyConfigEnvVars(notebook)
 		if err != nil {
 			return admission.Errored(http.StatusInternalServerError, err)
