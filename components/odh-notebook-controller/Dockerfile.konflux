@@ -21,7 +21,7 @@ USER root
 RUN go build -o ./bin/manager main.go
 
 # Use ubi8/ubi-minimal as base image
-FROM registry.access.redhat.com/ubi8/ubi-minimal@sha256:5b195cf0b8eb2262ce81334ee44066fdb5026022803f55bfe607be7d08d4fe43
+FROM registry.access.redhat.com/ubi8/ubi-minimal@sha256:8075621ed734d32d91faba9205bbbf310fc579eb3920ec292b2c67980e4dd51b
 
 ## Install additional packages
 RUN microdnf install -y shadow-utils &&\
