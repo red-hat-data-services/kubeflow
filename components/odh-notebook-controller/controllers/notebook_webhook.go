@@ -429,12 +429,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledNotebook)
 }
 
-// InjectDecoder injects the decoder.
-func (w *NotebookWebhook) InjectDecoder(d admission.Decoder) error {
-	w.Decoder = d
-	return nil
-}
-
 // maybeRestartRunningNotebook evaluates whether the updates being made cause notebook pod to restart.
 // If the restart is caused by updates made by the mutating webhook itself to already existing notebook,
 // and the notebook is not stopped, then these updates will be blocked until the notebook is stopped.
