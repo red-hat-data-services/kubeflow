@@ -57,7 +57,7 @@ type NotebookWebhook struct {
 	Log         logr.Logger
 	Client      client.Client
 	Config      *rest.Config
-	Decoder     *admission.Decoder
+	Decoder     admission.Decoder
 	OAuthConfig OAuthConfig
 	// controller namespace
 	Namespace string
@@ -427,12 +427,6 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 	}
 
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledNotebook)
-}
-
-// InjectDecoder injects the decoder.
-func (w *NotebookWebhook) InjectDecoder(d *admission.Decoder) error {
-	w.Decoder = d
-	return nil
 }
 
 // maybeRestartRunningNotebook evaluates whether the updates being made cause notebook pod to restart.
