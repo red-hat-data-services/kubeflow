@@ -193,7 +193,7 @@ jobs:
           cd components/odh-notebook-controller/config/base
           kubectl create ns opendatahub
 
-          echo "odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}" > params.env
+          sed -i "s|odh-notebook-controller-image=.*|odh-notebook-controller-image=localhost/${{env.IMG}}:${{env.TAG}}|" params.env
 
           cat <<EOF | kubectl apply -f -
           ---
