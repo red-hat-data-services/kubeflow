@@ -62,7 +62,7 @@ func getDashboardInstance(ctx context.Context, dynamicClient dynamic.Interface, 
 		}
 		// Catch "no matches for kind" when CRD is missing
 		if meta.IsNoMatchError(err) {
-			log.Info("Dashboard CRD is not installed in the cluster — skipping")
+			log.Info("Dashboard CRD is not installed in the cluster - skipping")
 			return nil, nil
 		}
 		log.Error(err, "Failed to retrieve Dashboard CR", "name", dashboardInstanceName)
@@ -82,7 +82,7 @@ func getDSPAInstance(ctx context.Context, k8sClient client.Client, namespace str
 		}
 		// Catch "no matches for kind" when CRD is missing
 		if meta.IsNoMatchError(err) {
-			log.Info("DSPA CRD is not installed in the cluster — skipping")
+			log.Info("DSPA CRD is not installed in the cluster - skipping")
 			return nil, nil
 		}
 		log.Error(err, "Failed to retrieve DSPA CR", "name", dspaInstanceName, "namespace", namespace)
@@ -194,7 +194,7 @@ func (r *OpenshiftNotebookReconciler) NewElyraRuntimeConfigSecret(ctx context.Co
 	if err != nil {
 		return err
 	}
-	// Neither DSPA nor Dashboard CRs are present — skipping Elyra secret creation
+	// Neither DSPA nor Dashboard CRs are present - skipping Elyra secret creation
 	if dspaInstance == nil && len(dashboardInstance) == 0 {
 		return nil
 	}
