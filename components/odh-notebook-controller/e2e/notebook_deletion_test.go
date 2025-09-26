@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	netv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -77,7 +75,7 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 
 	// Verify Notebook Network Policies are deleted
 	nbNetworkPolicyList := netv1.NetworkPolicyList{}
-	opts := filterServiceMeshManagedPolicies(nbMeta)
+	opts := []client.ListOption{client.InNamespace(nbMeta.Namespace)}
 	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
 		nperr := tc.customClient.List(ctx, &nbNetworkPolicyList, opts...)
 		if nperr != nil {
@@ -126,21 +124,6 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 	}
 
 	return nil
-}
-
-func filterServiceMeshManagedPolicies(nbMeta *metav1.ObjectMeta) []client.ListOption {
-	labelSelectorReq, err := labels.NewRequirement("app.kubernetes.io/managed-by", selection.NotIn, []string{"maistra-istio-operator"})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	notManagedByMeshLabel := labels.NewSelector()
-	notManagedByMeshLabel = notManagedByMeshLabel.Add(*labelSelectorReq)
-
-	return []client.ListOption{
-		client.InNamespace(nbMeta.Namespace),
-		client.MatchingLabelsSelector{Selector: notManagedByMeshLabel},
-	}
 }
 
 // isNetworkPolicyForNotebook checks if a NetworkPolicy targets a specific notebook

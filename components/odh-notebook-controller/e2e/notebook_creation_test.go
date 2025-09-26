@@ -34,9 +34,6 @@ func creationTestSuite(t *testing.T) {
 				require.NoError(t, err, "error creating Notebook object ")
 			})
 			t.Run("Notebook Route Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookRouteCreation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Route for Notebook ")
 			})
@@ -52,17 +49,11 @@ func creationTestSuite(t *testing.T) {
 			})
 
 			t.Run("Notebook OAuth sidecar Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecar(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar for Notebook ")
 			})
 
 			t.Run("Notebook OAuth sidecar Resource Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecarResources(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar resources for Notebook ")
 			})

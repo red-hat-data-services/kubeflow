@@ -56,10 +56,9 @@ type DeploymentMode int
 
 const (
 	OAuthProxy DeploymentMode = iota
-	ServiceMesh
 )
 
-var modes = [...]string{"oauth", "service-mesh"}
+var modes = [...]string{"oauth"}
 
 // Implementing flag.Value funcs, so we can use DeploymentMode as a CLI flag.
 func (d *DeploymentMode) String() string {
@@ -113,7 +112,6 @@ func NewTestContext() (*testContext, error) {
 	testNotebooksContextList := []notebookContext{
 		setupThothMinimalOAuthNotebook(),
 		setupThothOAuthCustomResourcesNotebook(),
-		setupThothMinimalServiceMeshNotebook(),
 	}
 
 	return &testContext{
