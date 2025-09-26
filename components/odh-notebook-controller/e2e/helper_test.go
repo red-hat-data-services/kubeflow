@@ -372,14 +372,3 @@ func setupThothOAuthCustomResourcesNotebook() notebookContext {
 	}
 	return thothOAuthCustomResourcesNbContext
 }
-
-func notebooksForScenario(notebooks []notebookContext, mode DeploymentMode) []notebookContext {
-	var filtered []notebookContext
-	for _, notebook := range notebooks {
-		if notebook.deploymentMode == mode {
-			filtered = append(filtered, notebook)
-		}
-	}
-
-	return filtered
-}

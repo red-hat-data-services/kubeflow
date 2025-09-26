@@ -25,8 +25,7 @@ import (
 func creationTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Creation of Notebook instance", func(t *testing.T) {
@@ -133,11 +132,7 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 		return err
 	}
 
-	if deploymentMode == OAuthProxy {
-		return tc.ensureOAuthNetworkPolicyExists(nbMeta)
-	}
-
-	return nil
+	return tc.ensureOAuthNetworkPolicyExists(nbMeta)
 }
 
 func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {

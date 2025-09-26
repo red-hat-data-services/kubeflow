@@ -15,8 +15,7 @@ import (
 func updateTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Update Notebook instance", func(t *testing.T) {

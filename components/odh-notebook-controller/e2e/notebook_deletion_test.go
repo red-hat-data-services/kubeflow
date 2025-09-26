@@ -22,8 +22,7 @@ import (
 func deletionTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Notebook Deletion", func(t *testing.T) {
@@ -103,24 +102,22 @@ func (tc *testContext) testNotebookResourcesDeletion(nbMeta *metav1.ObjectMeta) 
 		return fmt.Errorf("unable to delete Network policies for  %s : %v", nbMeta.Name, err)
 	}
 
-	if deploymentMode == OAuthProxy {
-		// Verify Notebook Route is deleted
-		nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
-		nbRoute := &routev1.Route{}
-		err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
-			err = tc.customClient.Get(ctx, nbRouteLookupKey, nbRoute)
-			if err != nil {
-				if errors.IsNotFound(err) {
-					return true, nil
-				}
-				log.Printf("Failed to get %s Route", nbMeta.Name)
-				return false, err
-			}
-			return false, nil
-		})
+	// Verify Notebook Route is deleted
+	nbRouteLookupKey := types.NamespacedName{Name: nbMeta.Name, Namespace: tc.testNamespace}
+	nbRoute := &routev1.Route{}
+	err = wait.PollUntilContextTimeout(tc.ctx, tc.resourceRetryInterval, tc.resourceCreationTimeout, false, func(ctx context.Context) (done bool, err error) {
+		err = tc.customClient.Get(ctx, nbRouteLookupKey, nbRoute)
 		if err != nil {
-			return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
+			if errors.IsNotFound(err) {
+				return true, nil
+			}
+			log.Printf("Failed to get %s Route", nbMeta.Name)
+			return false, err
 		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("unable to delete Route %s : %v", nbMeta.Name, err)
 	}
 
 	return nil

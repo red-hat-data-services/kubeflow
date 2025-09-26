@@ -26,7 +26,6 @@ import (
 var (
 	notebookTestNamespace string
 	skipDeletion          bool
-	deploymentMode        DeploymentMode
 	scheme                = runtime.NewScheme()
 )
 
@@ -50,32 +49,6 @@ type testContext struct {
 	ctx context.Context
 }
 
-// DeploymentMode indicates what infra scenarios should be verified by the test
-// with default being OAuthProxy scenario.
-type DeploymentMode int
-
-const (
-	OAuthProxy DeploymentMode = iota
-)
-
-var modes = [...]string{"oauth"}
-
-// Implementing flag.Value funcs, so we can use DeploymentMode as a CLI flag.
-func (d *DeploymentMode) String() string {
-	return modes[*d]
-}
-
-func (d *DeploymentMode) Set(s string) error {
-	for i := range modes {
-		if modes[i] == s {
-			*d = DeploymentMode(i)
-			return nil
-		}
-	}
-
-	return errors.Errorf("Unknown deployment mode %s. Try any of these %v", s, modes)
-}
-
 // notebookContext holds information about test notebook
 // Any notebook that needs to be added to the e2e test suite should be defined in
 // the notebookContext struct.
@@ -83,8 +56,7 @@ type notebookContext struct {
 	// metadata for Notebook object
 	nbObjectMeta *metav1.ObjectMeta
 	// metadata for Notebook Spec
-	nbSpec         *nbv1.NotebookSpec
-	deploymentMode DeploymentMode
+	nbSpec *nbv1.NotebookSpec
 }
 
 func NewTestContext() (*testContext, error) {
@@ -150,7 +122,6 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&notebookTestNamespace, "nb-namespace",
 		"e2e-notebook-controller", "Custom namespace where the notebook controllers are deployed")
 	flag.BoolVar(&skipDeletion, "skip-deletion", false, "skip deletion of the controllers")
-	flag.Var(&deploymentMode, "deploymentMode", "sets deployment mode")
 	flag.Parse()
 
 	os.Exit(m.Run())
