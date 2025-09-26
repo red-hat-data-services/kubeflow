@@ -83,7 +83,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/status,verbs=get
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update;patch
-// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
@@ -231,6 +231,11 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Create the objects required by the OAuth proxy sidecar (see notebook_oauth.go file)
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
+		// Ensure any existing unauthenticated route is cleaned up before creating OAuth objects
+		err = r.EnsureUnauthenticatedRouteAbsent(notebook, ctx)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 
 		err = r.ReconcileOAuthServiceAccount(notebook, ctx)
 		if err != nil {

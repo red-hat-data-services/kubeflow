@@ -18,6 +18,7 @@ package controllers
 import (
 	"context"
 	"reflect"
+	"strings"
 
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -237,4 +238,61 @@ func InsertSecondRedirectReference(sa *corev1.ServiceAccount, routeName string) 
 		`{"kind":"OAuthRedirectReference","apiVersion":"v1",` +
 		`"reference":{"kind":"Route","name":"` + routeName + `"}}`
 	return sa
+}
+
+// EnsureUnauthenticatedRouteAbsent deletes any existing unauthenticated route for the notebook
+// to prevent security bypasses when switching to OAuth mode. This function locates routes
+// owned by the notebook that are NOT OAuth routes and deletes them.
+func (r *OpenshiftNotebookReconciler) EnsureUnauthenticatedRouteAbsent(
+	notebook *nbv1.Notebook, ctx context.Context) error {
+	// Initialize logger format
+	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
+
+	// List all routes for this notebook
+	routeList := &routev1.RouteList{}
+	opts := []client.ListOption{
+		client.InNamespace(notebook.Namespace),
+		client.MatchingLabels{"notebook-name": notebook.Name},
+	}
+
+	err := r.List(ctx, routeList, opts...)
+	if err != nil {
+		log.Error(err, "Unable to list routes for unauthenticated route cleanup")
+		return err
+	}
+
+	// Check each route owned by this notebook
+	for _, route := range routeList.Items {
+		if metav1.IsControlledBy(&route, notebook) {
+			// Check if this is an unauthenticated route (not OAuth)
+			// OAuth routes have TLS termination set to "reencrypt" and target the OAuth service
+			if isUnauthenticatedRoute(&route) {
+				log.Info("Deleting unauthenticated route to prevent security bypass", "route", route.Name)
+				err = r.Delete(ctx, &route)
+				if err != nil && !apierrs.IsNotFound(err) {
+					log.Error(err, "Unable to delete unauthenticated route", "route", route.Name)
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// isUnauthenticatedRoute determines if a route is an unauthenticated route (vs OAuth route)
+// OAuth routes have specific characteristics: reencrypt termination and target the OAuth service
+func isUnauthenticatedRoute(route *routev1.Route) bool {
+	// OAuth routes use reencrypt termination and target the OAuth service (notebook-name-tls)
+	// Unauthenticated routes use edge termination and target the main service (notebook-name)
+	if route.Spec.TLS != nil && route.Spec.TLS.Termination == routev1.TLSTerminationReencrypt {
+		return false // This is an OAuth route
+	}
+
+	// Check if the target service name indicates this is an OAuth route
+	if route.Spec.To.Name != "" && strings.HasSuffix(route.Spec.To.Name, "-tls") {
+		return false // This is an OAuth route
+	}
+
+	return true // This is an unauthenticated route
 }
