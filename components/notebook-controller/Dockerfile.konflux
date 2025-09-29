@@ -47,7 +47,8 @@ USER 1001:0
 ENTRYPOINT [ "/manager" ]
 
 LABEL com.redhat.component="odh-notebook-controller-container" \
-      name="managed-open-data-hub/odh-notebook-controller-rhel8" \
+      name="rhoai/odh-kf-notebook-controller-rhel9" \
+      cpe="cpe:/a:redhat:openshift_ai:2.22::el9" \
       description="odh-notebook-controller" \
       summary="odh-notebook-controller" \
       maintainer="['managed-open-data-hub@redhat.com']" \
