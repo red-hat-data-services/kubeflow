@@ -22,7 +22,7 @@ COPY ${SOURCE_CODE}/common ./common
 # Update building workdir
 WORKDIR /opt/rhods/notebook-controller
 
-## Build the odh-notebook-controller
+## Build the odh-kf-notebook-controller
 USER root
 
 # Build
@@ -46,12 +46,12 @@ USER 1001:0
 
 ENTRYPOINT [ "/manager" ]
 
-LABEL com.redhat.component="odh-notebook-controller-container" \
-      name="managed-open-data-hub/odh-notebook-controller-rhel8" \
-      description="odh-notebook-controller" \
-      summary="odh-notebook-controller" \
+LABEL com.redhat.component="odh-kf-notebook-controller-container" \
+      name="rhoai/odh-kf-notebook-controller-rhel9" \
+      description="odh-kf-notebook-controller" \
+      summary="odh-kf-notebook-controller" \
       maintainer="['managed-open-data-hub@redhat.com']" \
       io.openshift.expose-services="" \
-      io.k8s.display-name="odh-notebook-controller" \
-      io.k8s.description="odh-notebook-controller" \
+      io.k8s.display-name="odh-kf-notebook-controller" \
+      io.k8s.description="odh-kf-notebook-controller" \
       com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
