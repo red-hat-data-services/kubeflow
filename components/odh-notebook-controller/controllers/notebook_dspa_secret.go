@@ -160,7 +160,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, dashboardInstance map[st
 	} else if dashboardURL, ok := status["url"].(string); !ok || dashboardURL == "" {
 		log.Info("Dashboard CR: 'url' field is missing or empty")
 	} else {
-		publicAPIEndpoint := fmt.Sprintf("https://%s/experiments/%s/", dashboardURL, notebook.Namespace)
+		publicAPIEndpoint := fmt.Sprintf("https://%s/external/elyra/%s", dashboardURL, notebook.Namespace)
 		metadata["public_api_endpoint"] = publicAPIEndpoint
 	}
 
