@@ -13,8 +13,8 @@ CONTAINER_ENGINE ?= podman
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # We should try to use the kubernetes version that is used in the oldest OpenShift we support: https://access.redhat.com/solutions/4870701
-# Right now we target the OCP 4.15 as the oldest one: https://access.redhat.com/articles/rhoai-supported-configs
-ENVTEST_K8S_VERSION = 1.28
+# Right now we target the OCP 4.19 as the oldest one: https://access.redhat.com/articles/rhoai-supported-configs
+ENVTEST_K8S_VERSION = 1.32
 
 # Kubernetes configuration
 K8S_NAMESPACE ?= odh-notebook-controller-system
