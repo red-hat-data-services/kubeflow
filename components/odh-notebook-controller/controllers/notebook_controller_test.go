@@ -1118,73 +1118,72 @@ var _ = Describe("The Openshift Notebook controller", func() {
 		})
 	})
 
-	When("Creating notebook as part of Service Mesh", func() {
-
+	When("Switching from unauthenticated to OAuth mode", func() {
 		const (
-			name      = "test-notebook-mesh"
-			namespace = "mesh-ns"
+			name      = "test-notebook-route-cleanup"
+			namespace = "switch-oauth-ns"
 		)
 		testNamespaces = append(testNamespaces, namespace)
 
-		notebookOAuthNetworkPolicy := createOAuthNetworkPolicy(name, namespace, corev1.ProtocolTCP, NotebookOAuthPort)
-
-		It("Should not add OAuth sidecar", func() {
+		It("Should clean up unauthenticated routes when enabling OAuth", func() {
+			By("Creating a notebook without OAuth initially")
 			notebook := createNotebook(name, namespace)
-			notebook.SetAnnotations(map[string]string{AnnotationServiceMesh: "true"})
+			// Explicitly ensure OAuth is disabled initially
+			delete(notebook.Annotations, AnnotationInjectOAuth)
 			Expect(cli.Create(ctx, notebook)).Should(Succeed())
 
-			actualNotebook := &nbv1.Notebook{}
+			// Wait for the unauthenticated route to be created
+			unauthRoute := &routev1.Route{}
 			Eventually(func() error {
 				key := types.NamespacedName{Name: name, Namespace: namespace}
-				return cli.Get(ctx, key, actualNotebook)
+				return cli.Get(ctx, key, unauthRoute)
 			}, duration, interval).Should(Succeed())
 
-			Expect(actualNotebook.Spec.Template.Spec.Containers).To(Not(ContainElement(createOAuthContainer(name, namespace))))
-		})
+			By("Verifying the unauthenticated route has edge termination")
+			Expect(unauthRoute.Spec.TLS.Termination).To(Equal(routev1.TLSTerminationEdge))
+			Expect(unauthRoute.Spec.To.Name).To(Equal(name)) // Points to main service
 
-		It("Should not define OAuth network policy", func() {
-			policies := &netv1.NetworkPolicyList{}
+			By("Enabling OAuth on the notebook")
+			// Update the notebook to enable OAuth
 			Eventually(func() error {
-				return cli.List(ctx, policies, client.InNamespace(namespace))
+				key := types.NamespacedName{Name: name, Namespace: namespace}
+				err := cli.Get(ctx, key, notebook)
+				if err != nil {
+					return err
+				}
+				if notebook.Annotations == nil {
+					notebook.Annotations = make(map[string]string)
+				}
+				notebook.Annotations[AnnotationInjectOAuth] = "true"
+				return cli.Update(ctx, notebook)
 			}, duration, interval).Should(Succeed())
 
-			Expect(policies.Items).To(Not(ContainElement(notebookOAuthNetworkPolicy)))
-		})
-
-		It("Should not create routes", func() {
-			routes := &routev1.RouteList{}
+			By("Verifying the route is updated to OAuth configuration")
 			Eventually(func() error {
-				return cli.List(ctx, routes, client.InNamespace(namespace))
+				key := types.NamespacedName{Name: name, Namespace: namespace}
+				err := cli.Get(ctx, key, unauthRoute)
+				if err != nil {
+					return err
+				}
+				// OAuth route should have reencrypt termination and point to OAuth service
+				if unauthRoute.Spec.TLS.Termination != routev1.TLSTerminationReencrypt {
+					return fmt.Errorf("expected reencrypt termination, got %s", unauthRoute.Spec.TLS.Termination)
+				}
+				if unauthRoute.Spec.To.Name != name+"-tls" {
+					return fmt.Errorf("expected OAuth service target %s-tls, got %s", name, unauthRoute.Spec.To.Name)
+				}
+				return nil
 			}, duration, interval).Should(Succeed())
 
-			Expect(routes.Items).To(BeEmpty())
+			By("Verifying no additional unauthenticated routes exist")
+			routeList := &routev1.RouteList{}
+			Expect(cli.List(ctx, routeList, client.InNamespace(namespace),
+				client.MatchingLabels{"notebook-name": name})).Should(Succeed())
+
+			// Should only have one route, and it should be the OAuth route
+			Expect(routeList.Items).To(HaveLen(1))
+			Expect(routeList.Items[0].Spec.TLS.Termination).To(Equal(routev1.TLSTerminationReencrypt))
 		})
-
-		It("Should not create OAuth Service Account", func() {
-			oauthServiceAccount := createOAuthServiceAccount(name, namespace)
-
-			serviceAccounts := &corev1.ServiceAccountList{}
-			Eventually(func() error {
-				return cli.List(ctx, serviceAccounts, client.InNamespace(namespace))
-			}, duration, interval).Should(Succeed())
-
-			Expect(serviceAccounts.Items).ToNot(ContainElement(oauthServiceAccount))
-		})
-
-		It("Should not create OAuth secret", func() {
-			secrets := &corev1.SecretList{
-				TypeMeta: metav1.TypeMeta{
-					Kind:       "SecretList",
-					APIVersion: "v1",
-				},
-			}
-			Eventually(func() error {
-				return cli.List(ctx, secrets, client.InNamespace(namespace))
-			}, duration, interval).Should(Succeed())
-
-			Expect(secrets.Items).To(BeEmpty())
-		})
-
 	})
 
 	When("Checking ds-pipeline-config secret lifecycle", func() {

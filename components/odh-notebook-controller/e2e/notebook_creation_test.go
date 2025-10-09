@@ -25,8 +25,7 @@ import (
 func creationTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Creation of Notebook instance", func(t *testing.T) {
@@ -34,9 +33,6 @@ func creationTestSuite(t *testing.T) {
 				require.NoError(t, err, "error creating Notebook object ")
 			})
 			t.Run("Notebook Route Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookRouteCreation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Route for Notebook ")
 			})
@@ -52,17 +48,11 @@ func creationTestSuite(t *testing.T) {
 			})
 
 			t.Run("Notebook OAuth sidecar Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecar(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar for Notebook ")
 			})
 
 			t.Run("Notebook OAuth sidecar Resource Validation", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecarResources(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar resources for Notebook ")
 			})
@@ -142,11 +132,7 @@ func (tc *testContext) testNetworkPolicyCreation(nbMeta *metav1.ObjectMeta) erro
 		return err
 	}
 
-	if deploymentMode == OAuthProxy {
-		return tc.ensureOAuthNetworkPolicyExists(nbMeta)
-	}
-
-	return nil
+	return tc.ensureOAuthNetworkPolicyExists(nbMeta)
 }
 
 func (tc *testContext) ensureOAuthNetworkPolicyExists(nbMeta *metav1.ObjectMeta) error {

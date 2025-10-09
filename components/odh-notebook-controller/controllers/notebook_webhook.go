@@ -441,12 +441,8 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 	}
 
-	// Inject the OAuth proxy if the annotation is present but only if Service Mesh is disabled
+	// Inject the OAuth proxy if the annotation is present
 	if OAuthInjectionIsEnabled(notebook.ObjectMeta) {
-		if ServiceMeshIsEnabled(notebook.ObjectMeta) {
-			return admission.Denied(fmt.Sprintf("Cannot have both %s and %s set to true. Pick one.", AnnotationServiceMesh, AnnotationInjectOAuth))
-		}
-
 		// Inject OAuth proxy
 		err = InjectOAuthProxy(notebook, w.OAuthConfig)
 		if err != nil {

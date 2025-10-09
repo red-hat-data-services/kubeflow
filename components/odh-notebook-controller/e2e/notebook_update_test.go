@@ -15,8 +15,7 @@ import (
 func updateTestSuite(t *testing.T) {
 	testCtx, err := NewTestContext()
 	require.NoError(t, err)
-	notebooksForSelectedDeploymentMode := notebooksForScenario(testCtx.testNotebooks, deploymentMode)
-	for _, nbContext := range notebooksForSelectedDeploymentMode {
+	for _, nbContext := range testCtx.testNotebooks {
 		// prepend Notebook name to every subtest
 		t.Run(nbContext.nbObjectMeta.Name, func(t *testing.T) {
 			t.Run("Update Notebook instance", func(t *testing.T) {
@@ -24,9 +23,6 @@ func updateTestSuite(t *testing.T) {
 				require.NoError(t, err, "error updating Notebook object ")
 			})
 			t.Run("Notebook Route Validation After Update", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookRouteCreation(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing Route for Notebook after update ")
 			})
@@ -42,17 +38,11 @@ func updateTestSuite(t *testing.T) {
 			})
 
 			t.Run("Notebook OAuth sidecar Validation After Update", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecar(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar for Notebook after update ")
 			})
 
 			t.Run("Notebook OAuth sidecar Resource Validation After Update", func(t *testing.T) {
-				if deploymentMode == ServiceMesh {
-					t.Skipf("Skipping as it's not relevant for Service Mesh scenario")
-				}
 				err = testCtx.testNotebookOAuthSidecarResources(nbContext.nbObjectMeta)
 				require.NoError(t, err, "error testing sidecar resources for Notebook after update ")
 			})

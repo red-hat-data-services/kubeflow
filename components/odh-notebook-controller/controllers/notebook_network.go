@@ -17,9 +17,10 @@ package controllers
 
 import (
 	"context"
+	"reflect"
+
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
@@ -52,13 +53,11 @@ func (r *OpenshiftNotebookReconciler) ReconcileAllNetworkPolicies(notebook *nbv1
 		return err
 	}
 
-	if !ServiceMeshIsEnabled(notebook.ObjectMeta) {
-		desiredOAuthNetworkPolicy := NewOAuthNetworkPolicy(notebook)
-		err = r.reconcileNetworkPolicy(desiredOAuthNetworkPolicy, ctx, notebook)
-		if err != nil {
-			log.Error(err, "error creating Notebook OAuth network policy")
-			return err
-		}
+	desiredOAuthNetworkPolicy := NewOAuthNetworkPolicy(notebook)
+	err = r.reconcileNetworkPolicy(desiredOAuthNetworkPolicy, ctx, notebook)
+	if err != nil {
+		log.Error(err, "error creating Notebook OAuth network policy")
+		return err
 	}
 
 	return nil
