@@ -28,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -284,11 +283,11 @@ func (r *OpenshiftNotebookReconciler) ReconcileKubeRbacProxyConfigMap(notebook *
 
 // TODO: We need to revisit in favor of https://issues.redhat.com/browse/RHOAIENG-36109
 // NewNotebookKubeRbacProxyClusterRoleBinding defines the desired ClusterRoleBinding object for kube-rbac-proxy authentication
-// This creates one ClusterRoleBinding per namespace that grants auth-delegator permissions to all ServiceAccounts in that namespace
+// This creates one ClusterRoleBinding per notebook that grants auth-delegator permissions.
 func NewNotebookKubeRbacProxyClusterRoleBinding(notebook *nbv1.Notebook) *rbacv1.ClusterRoleBinding {
 	return &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: fmt.Sprintf("odh-notebooks-%s-auth-delegator", notebook.Namespace),
+			Name: fmt.Sprintf("%s-rbac-%s-auth-delegator", notebook.Name, notebook.Namespace),
 			Labels: map[string]string{
 				"opendatahub.io/component": "notebook-controller",
 				"opendatahub.io/namespace": notebook.Namespace,
@@ -301,9 +300,9 @@ func NewNotebookKubeRbacProxyClusterRoleBinding(notebook *nbv1.Notebook) *rbacv1
 		},
 		Subjects: []rbacv1.Subject{
 			{
-				Kind:     "Group",
-				Name:     fmt.Sprintf("system:serviceaccounts:%s", notebook.Namespace),
-				APIGroup: "rbac.authorization.k8s.io",
+				Kind:      "ServiceAccount",
+				Name:      notebook.Name,
+				Namespace: notebook.Namespace,
 			},
 		},
 	}
@@ -348,48 +347,22 @@ func (r *OpenshiftNotebookReconciler) CleanupKubeRbacProxyClusterRoleBinding(not
 	// Initialize logger format
 	log := r.Log.WithValues("notebook", notebook.Name, "namespace", notebook.Namespace)
 
-	// Check if there are other auth-enabled notebooks in this namespace
-	notebookList := &nbv1.NotebookList{}
-	err := r.List(ctx, notebookList, client.InNamespace(notebook.Namespace))
+	// delete the ClusterRoleBinding of the corresponding notebook
+	clusterRoleBindingName := fmt.Sprintf("%s-rbac-%s-auth-delegator", notebook.Name, notebook.Namespace)
+	err := r.Delete(ctx, &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterRoleBindingName,
+		},
+	})
 	if err != nil {
-		log.Error(err, "Unable to list notebooks in namespace")
+		if apierrs.IsNotFound(err) {
+			log.Info("kube-rbac-proxy ClusterRoleBinding already deleted", "clusterRoleBinding", clusterRoleBindingName)
+			return nil
+		}
+		log.Error(err, "Unable to delete kube-rbac-proxy ClusterRoleBinding", "clusterRoleBinding", clusterRoleBindingName)
 		return err
 	}
 
-	// Count auth-enabled notebooks (excluding the current one being deleted/disabled)
-	authNotebookCount := 0
-	for _, nb := range notebookList.Items {
-		// Skip the current notebook if it's being deleted or if it's the same notebook
-		if nb.Name == notebook.Name {
-			continue
-		}
-		if KubeRbacProxyInjectionIsEnabled(nb.ObjectMeta) {
-			authNotebookCount++
-		}
-	}
-
-	// Only delete the ClusterRoleBinding if this is the last auth-enabled notebook in the namespace
-	if authNotebookCount == 0 {
-		clusterRoleBindingName := fmt.Sprintf("odh-notebooks-%s-auth-delegator", notebook.Namespace)
-
-		clusterRoleBinding := &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: clusterRoleBindingName,
-			},
-		}
-
-		err := r.Delete(ctx, clusterRoleBinding)
-		if err != nil && !apierrs.IsNotFound(err) {
-			log.Error(err, "Unable to delete kube-rbac-proxy ClusterRoleBinding")
-			return err
-		}
-
-		if err == nil {
-			log.Info("Deleted kube-rbac-proxy ClusterRoleBinding for namespace", "clusterRoleBinding", clusterRoleBindingName)
-		}
-	} else {
-		log.Info("Keeping kube-rbac-proxy ClusterRoleBinding as other auth-enabled notebooks exist in namespace", "count", authNotebookCount)
-	}
-
+	log.Info("Successfully deleted kube-rbac-proxy ClusterRoleBinding", "clusterRoleBinding", clusterRoleBindingName)
 	return nil
 }
