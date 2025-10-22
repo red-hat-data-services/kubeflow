@@ -901,7 +901,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
     verb: get
     resource: notebooks
     apiGroup: kubeflow.org
-    resourceName: %s
+    name: %s
     namespace: %s`, Name, Namespace),
 			},
 		}
