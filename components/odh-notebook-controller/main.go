@@ -33,6 +33,7 @@ import (
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	imagev1 "github.com/openshift/api/image/v1"
+	oauthv1 "github.com/openshift/api/oauth/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -61,6 +62,7 @@ func init() {
 	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(imagev1.AddToScheme(scheme))
 	utilruntime.Must(dspav1.AddToScheme(scheme))
+	utilruntime.Must(oauthv1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }
