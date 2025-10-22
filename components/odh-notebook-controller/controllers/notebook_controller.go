@@ -89,6 +89,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies/finalizers,verbs=update;patch
+// +kubebuilder:rbac:groups=oauth.openshift.io,resources=oauthclients,verbs=get;list;watch;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
@@ -180,6 +181,29 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Handle deletion with finalizer
 	const finalizerName = "notebook.opendatahub.io/kube-rbac-proxy-cleanup"
 	if notebook.DeletionTimestamp != nil {
+
+		// In RHOAI 2.25, there were used OAuthClient CR for each workbench.
+		// We used finalizers to remove them on the workbench destroy operation.
+		// Since RHOAI 3.0, the OAuthClient CR aren't created for workbenches anymore,
+		// but we're keeping this cleanup code here for any users migrating from 2.x -> 3.x release.
+		// Check if we have the OAuth client finalizer
+		if r.hasOAuthClientFinalizer(notebook) {
+			log.Info("Cleaning up OAuthClient before notebook deletion")
+			// Delete the OAuthClient
+			err := r.deleteOAuthClient(notebook, ctx)
+			if err != nil {
+				log.Error(err, "Failed to delete OAuthClient")
+				return ctrl.Result{}, err
+			}
+			// Remove the finalizer
+			err = r.removeOAuthClientFinalizer(notebook, ctx)
+			if err != nil {
+				log.Error(err, "Failed to remove OAuth client finalizer")
+				return ctrl.Result{}, err
+			}
+			log.Info("Successfully cleaned up OAuthClient and removed finalizer")
+		}
+
 		// Notebook is being deleted
 		if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
 			// Clean up ClusterRoleBinding before allowing deletion
