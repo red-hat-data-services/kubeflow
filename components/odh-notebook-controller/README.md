@@ -55,7 +55,7 @@ authorization:
     verb: get
     resource: notebooks
     apiGroup: kubeflow.org
-    resourceName: example
+    name: example
     namespace: opendatahub
 ```
 
