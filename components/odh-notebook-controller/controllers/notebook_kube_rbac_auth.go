@@ -183,7 +183,7 @@ func NewNotebookKubeRbacProxyConfigMap(notebook *nbv1.Notebook) *corev1.ConfigMa
     verb: get
     resource: notebooks
     apiGroup: kubeflow.org
-    resourceName: %s
+    name: %s
     namespace: %s`, notebook.Name, notebook.Namespace)
 
 	return &corev1.ConfigMap{
