@@ -24,7 +24,7 @@ jobs:
           - components/odh-notebook-controller
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v6
         with:
@@ -76,7 +76,7 @@ jobs:
           - components/odh-notebook-controller
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # latest govulncheck works with the latest stable go version
       - uses: actions/setup-go@v6
@@ -96,7 +96,7 @@ jobs:
   check-generated-code:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Rerun all code generators we have
         run: bash ci/generate_code.sh
@@ -116,7 +116,7 @@ jobs:
   code-static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # This simply checks that the manifests and respective kustomization.yaml finishes without an error.
       - name: Check kustomize manifest
