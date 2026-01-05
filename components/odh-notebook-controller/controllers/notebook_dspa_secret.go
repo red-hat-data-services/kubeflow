@@ -108,7 +108,13 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 	if host == "" {
 		return nil, fmt.Errorf("invalid DSPA CR: missing or invalid 'host'")
 	}
-	cosEndpoint := fmt.Sprintf("https://%s", host)
+
+	// Use scheme from DSPA CR, default to "https" if not specified
+	scheme := externalStorage.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	cosEndpoint := fmt.Sprintf("%s://%s", scheme, host)
 
 	cosBucket := externalStorage.Bucket
 	if cosBucket == "" {
