@@ -24,6 +24,7 @@ import (
 	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	dspav1 "github.com/opendatahub-io/data-science-pipelines-operator/api/v1"
+	routev1 "github.com/openshift/api/route/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -92,8 +93,127 @@ func getGatewayInstance(ctx context.Context, dynamicClient dynamic.Interface, lo
 	return obj.UnstructuredContent(), nil
 }
 
+// getGatewayConfigOwnerName extracts the GatewayConfig name from the Gateway's ownerReferences.
+// Returns empty string if no GatewayConfig owner is found.
+func getGatewayConfigOwnerName(gatewayInstance map[string]interface{}) string {
+	if len(gatewayInstance) == 0 {
+		return ""
+	}
+
+	metadata, ok := gatewayInstance["metadata"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	ownerRefs, ok := metadata["ownerReferences"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, ownerRef := range ownerRefs {
+		ownerMap, ok := ownerRef.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		kind, _ := ownerMap["kind"].(string)
+		if kind == "GatewayConfig" {
+			name, _ := ownerMap["name"].(string)
+			return name
+		}
+	}
+
+	return ""
+}
+
+// getHostnameForPublicEndpoint extracts the hostname for the public API endpoint from Gateway CR,
+// with fallback to Route if Gateway doesn't have a hostname configured.
+func getHostnameForPublicEndpoint(ctx context.Context, gatewayInstance map[string]interface{}, k8sClient client.Client, log logr.Logger) string {
+	var hostname string
+
+	if len(gatewayInstance) == 0 {
+		log.Info("Gateway CR: not present or empty")
+		return ""
+	} else if spec, ok := gatewayInstance["spec"].(map[string]interface{}); !ok {
+		log.Info("Gateway CR: 'spec' field is missing or invalid - trying Route fallback")
+	} else if listeners, ok := spec["listeners"].([]interface{}); !ok || len(listeners) == 0 {
+		log.Info("Gateway CR: 'listeners' field is missing, invalid, or empty - trying Route fallback")
+	} else {
+		// Extract hostname from the first listener
+		if listener, ok := listeners[0].(map[string]interface{}); ok {
+			if gatewayHostname, ok := listener["hostname"].(string); ok && gatewayHostname != "" {
+				hostname = gatewayHostname
+				log.Info("Using hostname from Gateway CR", "hostname", hostname)
+			} else {
+				log.Info("Gateway CR: 'hostname' field is missing or empty in listener - trying Route fallback")
+			}
+		} else {
+			log.Info("Gateway CR: first listener has invalid format - trying Route fallback")
+		}
+	}
+
+	if hostname == "" {
+		// Fallback: If hostname not found in Gateway CR, try to get it from Route owned by the same GatewayConfig
+		gatewayConfigName := getGatewayConfigOwnerName(gatewayInstance)
+
+		if gatewayConfigName != "" {
+			routeHostname, err := getHostnameFromRoute(ctx, k8sClient, gatewayConfigName, log)
+			if err != nil {
+				log.Error(err, "Failed to get hostname from Route")
+				// Continue without hostname - it's optional
+			} else if routeHostname != "" {
+				hostname = routeHostname
+				log.Info("Using hostname from Route", "hostname", hostname)
+			} else {
+				log.Info("No hostname found in Gateway CR or Route - public API endpoint will not be set")
+			}
+		} else {
+			log.Info("Gateway CR has no GatewayConfig owner - cannot fallback to Route")
+		}
+	}
+
+	return hostname
+}
+
+// getHostnameFromRoute retrieves the hostname from an OpenShift Route owned by the specified GatewayConfig.
+// This is used as a fallback when the Gateway CR doesn't contain a hostname (e.g., when using ingressMode: OcpRoute).
+func getHostnameFromRoute(ctx context.Context, k8sClient client.Client, gatewayConfigName string, log logr.Logger) (string, error) {
+	if gatewayConfigName == "" {
+		return "", nil
+	}
+
+	// List all routes in the gateway namespace
+	routeList := &routev1.RouteList{}
+	err := k8sClient.List(ctx, routeList, client.InNamespace(gatewayNamespace))
+	if err != nil {
+		if meta.IsNoMatchError(err) {
+			log.Info("Route CRD is not installed in the cluster - skipping route fallback")
+			return "", nil
+		}
+		log.Error(err, "Failed to list Routes", "namespace", gatewayNamespace)
+		return "", err
+	}
+
+	// Find a Route owned by the specified GatewayConfig
+	for _, route := range routeList.Items {
+		for _, ownerRef := range route.OwnerReferences {
+			if ownerRef.Kind == "GatewayConfig" && ownerRef.Name == gatewayConfigName {
+				if route.Spec.Host != "" {
+					log.Info("Found hostname from Route owned by GatewayConfig", "hostname", route.Spec.Host, "route", route.Name, "gatewayConfig", gatewayConfigName)
+					return route.Spec.Host, nil
+				}
+				// Route found but host is empty
+				log.Info("Route owned by GatewayConfig found but spec.host is empty", "route", route.Name, "gatewayConfig", gatewayConfigName)
+				return "", nil
+			}
+		}
+	}
+
+	log.Info("No Route with matching GatewayConfig owner found", "namespace", gatewayNamespace, "gatewayConfig", gatewayConfigName)
+	return "", nil
+}
+
 // extractElyraRuntimeConfigInfo retrieves the essential configuration details from dspa and gateway CRs used for pipeline execution.
-func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, client client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
+func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[string]interface{}, dspaInstance *dspav1.DataSciencePipelinesApplication, k8sClient client.Client, notebook *nbv1.Notebook, log logr.Logger) (map[string]interface{}, error) {
 
 	// Extract API Endpoint from DSPA status
 	apiEndpoint := dspaInstance.Status.Components.APIServer.ExternalUrl
@@ -128,7 +248,7 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 
 	// Fetch secret containing credentials
 	dspaCOSSecret := &corev1.Secret{}
-	err := client.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: cosSecret, Namespace: notebook.Namespace}, dspaCOSSecret)
 	if err != nil {
 		log.Error(err, "Failed to get secret", "secretName", cosSecret)
 		return nil, fmt.Errorf("failed to get secret '%s': %w", cosSecret, err)
@@ -159,32 +279,16 @@ func extractElyraRuntimeConfigInfo(ctx context.Context, gatewayInstance map[stri
 		"cos_secret":    cosSecret,
 	}
 
-	// Extract hostname for public API endpoint from Gateway CR only
-	var hostname string
-
-	if len(gatewayInstance) == 0 {
-		log.Info("Gateway CR: not present or empty - public API endpoint will not be set")
-	} else if spec, ok := gatewayInstance["spec"].(map[string]interface{}); !ok {
-		log.Info("Gateway CR: 'spec' field is missing or invalid - public API endpoint will not be set")
-	} else if listeners, ok := spec["listeners"].([]interface{}); !ok || len(listeners) == 0 {
-		log.Info("Gateway CR: 'listeners' field is missing, invalid, or empty - public API endpoint will not be set")
-	} else {
-		// Extract hostname from the first listener
-		if listener, ok := listeners[0].(map[string]interface{}); ok {
-			if gatewayHostname, ok := listener["hostname"].(string); ok && gatewayHostname != "" {
-				hostname = gatewayHostname
-				log.Info("Using hostname from Gateway CR", "hostname", hostname)
-			} else {
-				log.Info("Gateway CR: 'hostname' field is missing or empty in listener - public API endpoint will not be set")
-			}
-		}
-	}
+	// Extract hostname for public API endpoint from Gateway CR, with fallback to Route
+	hostname := getHostnameForPublicEndpoint(ctx, gatewayInstance, k8sClient, log)
 
 	// Set public API endpoint if we have a hostname from Gateway
 	if hostname != "" {
 		publicAPIEndpoint := fmt.Sprintf("https://%s/external/elyra/%s", hostname, notebook.Namespace)
 		metadata["public_api_endpoint"] = publicAPIEndpoint
 		log.Info("Set public API endpoint", "endpoint", publicAPIEndpoint)
+	} else {
+		log.Info("No hostname found for public API endpoint")
 	}
 
 	// Return the full runtime config
