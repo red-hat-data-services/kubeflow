@@ -12,7 +12,7 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: opendatahub-builds
-    appstudio.openshift.io/component: odh-notebook-controller
+    appstudio.openshift.io/component: odh-notebook-controller-ci
     pipelines.appstudio.openshift.io/type: build
   name: odh-notebook-controller-on-push
   namespace: open-data-hub-tenant
