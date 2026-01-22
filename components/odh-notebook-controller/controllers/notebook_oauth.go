@@ -36,9 +36,9 @@ const (
 	OAuthServicePort     = 443
 	OAuthServicePortName = "oauth-proxy"
 	// OAuthProxyImage uses sha256 manifest list digest value of v4.14 image for AMD64 as default to be compatible with imagePullPolicy: IfNotPresent, overridable
-	// taken from https://catalog.redhat.com/software/containers/openshift4/ose-oauth-proxy/5cdb2133bed8bd5717d5ae64?image=66cefc14401df6ff4664ec43&architecture=amd64&container-tabs=overview
+	// taken from https://catalog.redhat.com/en/software/containers/openshift4/ose-oauth-proxy/5cdb2133bed8bd5717d5ae64?image=693a054b477beee9b7330b1f&architecture=amd64&container-tabs=security#overview
 	// and kept in sync with the manifests here and in ClusterServiceVersion metadata of opendatahub operator
-	OAuthProxyImage = "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:4f8d66597feeb32bb18699326029f9a71a5aca4a57679d636b876377c2e95695"
+	OAuthProxyImage = "registry.redhat.io/openshift4/ose-oauth-proxy@sha256:d26a9f4fd48c83bd488ebb889ccec7d65f3bd49e2c94e57c98971a3594d90612"
 )
 
 type OAuthConfig struct {
