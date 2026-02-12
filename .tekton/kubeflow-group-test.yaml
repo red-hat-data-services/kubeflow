@@ -3,7 +3,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/feast?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/opendatahub-io/kubeflow?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
@@ -11,11 +11,11 @@ metadata:
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "group-test"
     pipelinesascode.tekton.dev/on-comment: "^/group-test"
-  name: feast-group-test
+  name: kubeflow-group-test
   namespace: open-data-hub-tenant
   labels:
     appstudio.openshift.io/application: group-testing
-    appstudio.openshift.io/component: feast-group
+    appstudio.openshift.io/component: kubeflow-group
     pipelines.appstudio.openshift.io/type: test
 spec:
   params:
