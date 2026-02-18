@@ -18,6 +18,9 @@ metadata:
     appstudio.openshift.io/component: kubeflow-group
     pipelines.appstudio.openshift.io/type: test
 spec:
+  timeouts:
+    pipeline: 10h
+    tasks: 8h
   params:
   - name: group-components
     value: '{ "odh-notebook-controller-ci": "opendatahub/odh-notebook-controller", "odh-kf-notebook-controller-ci": "opendatahub/kubeflow-notebook-controller" }'
