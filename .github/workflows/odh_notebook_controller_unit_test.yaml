@@ -34,4 +34,5 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./components/odh-notebook-controller/cover-rbac-false.out,./components/odh-notebook-controller/cover-rbac-true.out
+        flags: odh-notebook-controller
         disable_search: true
