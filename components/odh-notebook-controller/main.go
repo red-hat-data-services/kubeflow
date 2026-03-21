@@ -25,6 +25,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/opendatahub-io/kubeflow/components/odh-notebook-controller/controllers"
@@ -42,6 +43,8 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
@@ -69,6 +72,32 @@ func init() {
 	utilruntime.Must(routev1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
+}
+
+// stripConfigMapData removes data payloads and managed fields from cached ConfigMaps.
+// ConfigMap data is read via direct API calls (DisableFor) when needed.
+// Note: SetManagedFields is called here because DefaultTransform does not apply
+// to types that have a per-type Transform override in ByObject.
+func stripConfigMapData(i interface{}) (interface{}, error) {
+	if cm, ok := i.(*corev1.ConfigMap); ok {
+		cm.Data = nil
+		cm.BinaryData = nil
+		cm.SetManagedFields(nil)
+	}
+	return i, nil
+}
+
+// stripSecretData removes data payloads and managed fields from cached Secrets.
+// Secret data is read via direct API calls (DisableFor) when needed.
+// Note: SetManagedFields is called here because DefaultTransform does not apply
+// to types that have a per-type Transform override in ByObject.
+func stripSecretData(i interface{}) (interface{}, error) {
+	if s, ok := i.(*corev1.Secret); ok {
+		s.Data = nil
+		s.StringData = nil
+		s.SetManagedFields(nil)
+	}
+	return i, nil
 }
 
 func getControllerNamespace() (string, error) {
@@ -133,6 +162,27 @@ func main() {
 			Port:    webhookPort,
 			CertDir: webhookCertDir,
 		}),
+		Cache: cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
+			ByObject: map[client.Object]cache.ByObject{
+				// Strip data payloads from ConfigMaps and Secrets in the
+				// informer cache. The controller watches ConfigMaps for
+				// external resources (odh-config, trusted CA bundles) that
+				// cannot be filtered by label, so we keep the informer but
+				// minimize cached object size. Actual data reads go through
+				// direct API calls via DisableFor.
+				&corev1.ConfigMap{}: {Transform: stripConfigMapData},
+				&corev1.Secret{}:    {Transform: stripSecretData},
+			},
+		},
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				DisableFor: []client.Object{
+					&corev1.ConfigMap{},
+					&corev1.Secret{},
+				},
+			},
+		},
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrConfig)
