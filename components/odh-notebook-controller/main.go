@@ -200,11 +200,12 @@ func main() {
 	}
 	setupLog.Info("Controller is running in namespace", "namespace", namespace)
 	if err = (&controllers.OpenshiftNotebookReconciler{
-		Client:    mgr.GetClient(),
-		Log:       ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
-		Namespace: namespace,
-		Scheme:    mgr.GetScheme(),
-		Config:    mgr.GetConfig(),
+		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("odh-notebook-controller"),
+		Namespace:     namespace,
+		Scheme:        mgr.GetScheme(),
+		Config:        mgr.GetConfig(),
+		EventRecorder: mgr.GetEventRecorderFor("odh-notebook-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "odh-notebook-controller")
 		os.Exit(1)
@@ -225,6 +226,16 @@ func main() {
 		},
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
+
+	// Setup notebook validating webhook
+	notebookValidatingWebhook := &webhook.Admission{
+		Handler: &controllers.NotebookValidatingWebhook{
+			Log:     ctrl.Log.WithName("controllers").WithName("odh-notebook-validating-webhook"),
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(mgr.GetScheme()),
+		},
+	}
+	hookServer.Register("/validate-notebook-v1", notebookValidatingWebhook)
 
 	//+kubebuilder:scaffold:builder
 
