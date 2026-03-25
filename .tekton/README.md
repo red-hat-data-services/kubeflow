@@ -3,7 +3,9 @@ This directory contains Tekton `PipelineRun` definitions used by Konflux for the
 The baseline configuration comes from the stable branch:
 https://github.com/opendatahub-io/kubeflow/tree/stable/.tekton
 
-These definitions were adapted with the following changes:
+## Pull-request pipelines
+
+The PR pipeline definitions (`*-pull-request.yaml`) were adapted from stable with the following changes:
 
 - Branch references were updated from `stable` to `main`.
 - PR-built images are configured to expire after `7d`.
@@ -22,3 +24,15 @@ These definitions were adapted with the following changes:
 - name: enable-slack-failure-notification
   value: "false"
 ```
+
+## Push pipelines
+
+The push pipeline definitions (`*-push.yaml`) trigger when changes are merged to `main`. They build multi-arch container images, push them to Quay, and trigger e2e group testing.
+
+Key differences from the stable branch push pipelines:
+
+- Added `pathChanged()` filter in the CEL expression so builds only trigger when `components/` or `.tekton/` files change.
+- Added pipeline timeouts (2h pipeline / 1h per task).
+- `pipeline-type` is set to `"kubeflow-main-build"` instead of the default `"push"`. This deliberately prevents the `trigger-operator-build` task from running, which would otherwise kick off downstream operator, operator-bundle, and FBC fragment CI builds. Those downstream triggers are not needed on the `main` branch.
+- `enable-group-testing` is set to `"true"` to run e2e tests after a successful build.
+- Push-built images use the `:odh-main` tag and do not expire.
