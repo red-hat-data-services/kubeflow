@@ -94,6 +94,10 @@ const (
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 
 	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
+
+	// RHOAIENG-12325: Certificate mount path constants
+	TrustedCACertsMountPath = "/etc/pki/tls/custom-certs"
+	TrustedCACertFileName   = "ca-bundle.crt"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -645,12 +649,12 @@ func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 
 			for key, val := range proxyEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if Proxy spec is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -736,10 +740,8 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	configVolumeName := "trusted-ca"
 	// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates.
 	// Kubernetes does not propagate ConfigMap updates when using subPath mounts.
-	configMapMountPath := "/etc/pki/tls/custom-certs"
-	configMapMountValue := "ca-bundle.crt"
 	// Environment variables point to the certificate file inside the mounted directory
-	certFilePath := configMapMountPath + "/" + configMapMountValue
+	certFilePath := TrustedCACertsMountPath + "/" + TrustedCACertFileName
 	configEnvVars := map[string]string{
 		"PIP_CERT":                  certFilePath,
 		"REQUESTS_CA_BUNDLE":        certFilePath,
@@ -788,12 +790,12 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 
 			for key, val := range configEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if env value is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -815,7 +817,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 			trustedCAVolMount := corev1.VolumeMount{
 				Name:      configVolumeName,
 				ReadOnly:  true,
-				MountPath: configMapMountPath,
+				MountPath: TrustedCACertsMountPath,
 				// SubPath removed - mount directory instead of file to enable auto-updates
 			}
 
