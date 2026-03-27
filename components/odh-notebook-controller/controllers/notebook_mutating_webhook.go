@@ -734,22 +734,26 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 
 func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 	configVolumeName := "trusted-ca"
-	configMapMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
-	configMapMountKey := "ca-bundle.crt"
+	// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates.
+	// Kubernetes does not propagate ConfigMap updates when using subPath mounts.
+	configMapMountPath := "/etc/pki/tls/custom-certs"
 	configMapMountValue := "ca-bundle.crt"
+	// Environment variables point to the certificate file inside the mounted directory
+	certFilePath := configMapMountPath + "/" + configMapMountValue
 	configEnvVars := map[string]string{
-		"PIP_CERT":                  configMapMountPath,
-		"REQUESTS_CA_BUNDLE":        configMapMountPath,
-		"SSL_CERT_FILE":             configMapMountPath,
-		"PIPELINES_SSL_SA_CERTS":    configMapMountPath,
-		"KF_PIPELINES_SSL_SA_CERTS": configMapMountPath,
-		"GIT_SSL_CAINFO":            configMapMountPath,
+		"PIP_CERT":                  certFilePath,
+		"REQUESTS_CA_BUNDLE":        certFilePath,
+		"SSL_CERT_FILE":             certFilePath,
+		"PIPELINES_SSL_SA_CERTS":    certFilePath,
+		"KF_PIPELINES_SSL_SA_CERTS": certFilePath,
+		"GIT_SSL_CAINFO":            certFilePath,
 	}
 
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	var imgContainer corev1.Container
 
 	// Add trusted-ca volume
+	// RHOAIENG-12325: Mount entire ConfigMap without Items to enable auto-updates
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
 	certVolumeExists := false
 	certVolume := corev1.Volume{
@@ -760,11 +764,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 					Name: configMapName,
 				},
 				Optional: ptr.To(true),
-				Items: []corev1.KeyToPath{{
-					Key:  configMapMountKey,
-					Path: configMapMountValue,
-				},
-				},
+				// Items removed - mount all keys to enable automatic updates
 			},
 		},
 	}
@@ -809,13 +809,14 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 			}
 
 			// Create Volume mount
+			// RHOAIENG-12325: Remove SubPath to enable ConfigMap auto-updates
 			volumeMountExists := false
 			containerVolMounts := &imgContainer.VolumeMounts
 			trustedCAVolMount := corev1.VolumeMount{
 				Name:      configVolumeName,
 				ReadOnly:  true,
 				MountPath: configMapMountPath,
-				SubPath:   configMapMountValue,
+				// SubPath removed - mount directory instead of file to enable auto-updates
 			}
 
 			for index, volumeMount := range *containerVolMounts {

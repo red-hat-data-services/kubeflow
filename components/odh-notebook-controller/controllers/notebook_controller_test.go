@@ -492,12 +492,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
-			volumeMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
+			// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates
+			volumeMountPath := "/etc/pki/tls/custom-certs"
 			expectedVolumeMount := corev1.VolumeMount{
 				Name:      "trusted-ca",
 				MountPath: volumeMountPath,
-				SubPath:   "ca-bundle.crt",
 				ReadOnly:  true,
+				// SubPath removed to enable automatic ConfigMap updates
 			}
 			// Check if the volume mount is present and matches the expected one
 			Expect(notebook.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(expectedVolumeMount))
@@ -508,12 +509,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{Name: workbenchTrustedCACertBundle},
 						Optional:             ptr.To(true),
-						Items: []corev1.KeyToPath{
-							{
-								Key:  "ca-bundle.crt",
-								Path: "ca-bundle.crt",
-							},
-						},
+						// Items removed to enable automatic ConfigMap updates (RHOAIENG-12325)
 					},
 				},
 			}
@@ -748,12 +744,13 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 			By("By checking that trusted-ca bundle is mounted")
 			// Assert that the volume mount and volume are added correctly
-			volumeMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
+			// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates
+			volumeMountPath := "/etc/pki/tls/custom-certs"
 			expectedVolumeMount := corev1.VolumeMount{
 				Name:      "trusted-ca",
 				MountPath: volumeMountPath,
-				SubPath:   "ca-bundle.crt",
 				ReadOnly:  true,
+				// SubPath removed to enable automatic ConfigMap updates
 			}
 			Expect(notebook.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(expectedVolumeMount))
 
@@ -763,12 +760,7 @@ var _ = Describe("The Openshift Notebook controller", func() {
 					ConfigMap: &corev1.ConfigMapVolumeSource{
 						LocalObjectReference: corev1.LocalObjectReference{Name: workbenchTrustedCACertBundle},
 						Optional:             ptr.To(true),
-						Items: []corev1.KeyToPath{
-							{
-								Key:  "ca-bundle.crt",
-								Path: "ca-bundle.crt",
-							},
-						},
+						// Items removed to enable automatic ConfigMap updates (RHOAIENG-12325)
 					},
 				},
 			}
