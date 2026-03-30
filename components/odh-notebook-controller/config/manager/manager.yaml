@@ -55,6 +55,8 @@ spec:
               cpu: 500m
               memory: 256Mi
           env:
+            - name: GOMEMLIMIT
+              value: "3600MiB"
             - name: SET_PIPELINE_RBAC
               value: "true"
             - name: SET_PIPELINE_SECRET
@@ -65,4 +67,3 @@ spec:
                   name: notebook-controller-setting-config
                   key: INJECT_CLUSTER_PROXY_ENV
                   optional: true
-
