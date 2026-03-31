@@ -53,7 +53,7 @@ jobs:
           git checkout -B "${BRANCH}"
           git add --all
           git commit -m "${COMMIT_MSG}"
-          git push --force-with-lease --set-upstream origin "${BRANCH}"
+          git push --force --set-upstream origin "${BRANCH}"
 
           existing_pr_number="$(gh pr list --head "${BRANCH}" --base "${BASE_BRANCH}" --json number --jq '.[0].number // empty')"
           if [[ -n "${existing_pr_number}" ]]; then
