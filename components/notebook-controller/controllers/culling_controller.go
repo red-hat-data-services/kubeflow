@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -282,8 +283,12 @@ func getNotebookApiKernels(nm, ns string, log logr.Logger) []KernelStatus {
 
 	var kernels []KernelStatus
 
-	defer resp.Body.Close()
-	err := json.NewDecoder(resp.Body).Decode(&kernels)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error(err, "Error closing response body.")
+		}
+	}()
+	err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&kernels)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API Kernels.")
 		return nil
@@ -302,8 +307,12 @@ func getNotebookApiTerminals(nm, ns string, log logr.Logger) []TerminalStatus {
 
 	var terminals []TerminalStatus
 
-	defer resp.Body.Close()
-	err := json.NewDecoder(resp.Body).Decode(&terminals)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error(err, "Error closing response body.")
+		}
+	}()
+	err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&terminals)
 	if err != nil {
 		log.Error(err, "Error parsing JSON response for Notebook API terminals.")
 		return nil
@@ -370,7 +379,7 @@ func compareAnnotationTimeToResource(meta *metav1.ObjectMeta, resourceTime strin
 
 func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []KernelStatus, log logr.Logger) bool {
 
-	if kernels == nil || len(kernels) == 0 {
+	if len(kernels) == 0 {
 		log.Info("Notebook has no kernels. Will not update last-activity")
 		return false
 	}
@@ -391,7 +400,7 @@ func updateTimestampFromKernelsActivity(meta *metav1.ObjectMeta, kernels []Kerne
 	}
 
 	t := getNotebookRecentTime(arr, "api/kernels", log)
-	log.Info(fmt.Sprintf("Comparing api/kernels last_activity time to current notebook annotation time"))
+	log.Info("Comparing api/kernels last_activity time to current notebook annotation time")
 	if t == "" || !compareAnnotationTimeToResource(meta, t, log) {
 		return false
 	}
@@ -406,7 +415,7 @@ func updateTimestampFromTerminalsActivity(meta *metav1.ObjectMeta, terminals []T
 	// check this timestamp against the current annotation timestamp to ensure we are not
 	// going backwards in time.
 
-	if terminals == nil || len(terminals) == 0 {
+	if len(terminals) == 0 {
 		log.Info("Notebook has no terminals. Will not update last-activity")
 		return false
 	}
@@ -417,7 +426,7 @@ func updateTimestampFromTerminalsActivity(meta *metav1.ObjectMeta, terminals []T
 	}
 
 	t := getNotebookRecentTime(arr, "api/terminals", log)
-	log.Info(fmt.Sprintf("Comparing api/terminals last_activity time to current notebook annotation time"))
+	log.Info("Comparing api/terminals last_activity time to current notebook annotation time")
 	if t == "" || !compareAnnotationTimeToResource(meta, t, log) {
 		return false
 	}
