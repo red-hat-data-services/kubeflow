@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/go-cmp/cmp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -61,6 +62,9 @@ type NotebookWebhook struct {
 	KubeRbacProxyConfig KubeRbacProxyConfig
 	// controller namespace
 	Namespace string
+	// MLflow configuration (read once at startup from env vars)
+	MLflowEnabled bool
+	GatewayURL    string
 }
 
 var proxyEnvVars = make(map[string]string, 3)
@@ -93,6 +97,10 @@ const (
 	LastImageSelectionAnnotation      = "notebooks.opendatahub.io/last-image-selection"
 
 	KubeRbacProxyTLSCertVolumeSecretSuffix = "-kube-rbac-proxy-tls"
+
+	// RHOAIENG-12325: Certificate mount path constants
+	TrustedCACertsMountPath = "/etc/pki/tls/custom-certs"
+	TrustedCACertFileName   = "ca-bundle.crt"
 )
 
 // InjectReconciliationLock injects the kubeflow notebook controller culling
@@ -397,7 +405,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		// Ensure the pipeline-runtime-images ConfigMap exists before trying to mount it.
 		// This fixes the race condition (RHOAIENG-24545) where the first notebook in a namespace
 		// would not have the runtime images mounted because the ConfigMap didn't exist yet.
-		err = SyncRuntimeImagesConfigMap(ctx, w.Client, log, notebook.Namespace, w.Namespace, w.Config)
+		err = SyncRuntimeImagesConfigMap(ctx, w.Client, log, notebook.Namespace, w.Namespace)
 		if err != nil {
 			log.Error(err, "Failed to sync runtime images ConfigMap")
 			// Don't fail the webhook on sync error - continue and try to mount if ConfigMap exists
@@ -414,7 +422,7 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			// Ensure the ds-pipeline-config Secret exists before trying to mount it.
 			// This fixes the race condition (RHOAIENG-24545) where the first notebook in a
 			// namespace would not have the secret mounted because it didn't exist yet.
-			err = SyncElyraRuntimeConfigSecret(ctx, w.Client, w.Config, notebook, log)
+			err = SyncElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
 			if err != nil {
 				log.Error(err, "Failed to sync Elyra runtime config secret")
 				// Don't fail the webhook on sync error - continue and try to mount if secret exists
@@ -441,6 +449,15 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 			// Label is disabled but volume is still mounted, unmount it
 			log.Info("Feast label disabled, removing Feast config volume")
 			unmountFeastConfig(notebook)
+		}
+
+		// Handle MLflow environment variables (ODH integration flag and tracking URI).
+		//
+		// MLflowEnabled=false intentionally skips cleanup of existing notebooks.
+		// Env vars are already baked into running pods; to revoke access immediately,
+		// remove the opendatahub.io/mlflow-instance annotation from the notebook.
+		if w.MLflowEnabled {
+			HandleMLflowEnvVars(ctx, w.Client, notebook, log, w.GatewayURL)
 		}
 	}
 
@@ -563,6 +580,71 @@ func (w *NotebookWebhook) maybeRestartRunningNotebook(ctx context.Context, req a
 	return mutatedNotebook, &UpdatesPending{Reason: diff}, nil
 }
 
+// =============================================================================
+// Pending Updates Detection
+// =============================================================================
+//
+// The following types and functions support maybeRestartRunningNotebook() above.
+// They detect when webhook mutations would cause a notebook pod restart and
+// generate human-readable diff messages explaining what changed.
+// =============================================================================
+
+// UpdatesPending is either NoPendingUpdates, or a new value providing a Reason for the update.
+type UpdatesPending struct {
+	Reason string
+}
+
+var (
+	NoPendingUpdates = &UpdatesPending{}
+)
+
+// FirstDifferenceReporter is a custom go-cmp reporter that only records the first difference.
+type FirstDifferenceReporter struct {
+	path cmp.Path
+	diff string
+}
+
+func (r *FirstDifferenceReporter) PushStep(ps cmp.PathStep) {
+	r.path = append(r.path, ps)
+}
+
+func (r *FirstDifferenceReporter) Report(rs cmp.Result) {
+	if r.diff == "" && !rs.Equal() {
+		vx, vy := r.path.Last().Values()
+		r.diff = fmt.Sprintf("%#v: %+v != %+v", r.path, vx, vy)
+	}
+}
+
+func (r *FirstDifferenceReporter) PopStep() {
+	r.path = r.path[:len(r.path)-1]
+}
+
+func (r *FirstDifferenceReporter) String() string {
+	return r.diff
+}
+
+// getStructDiff compares a and b, reporting the first difference it found in a human-readable single-line string.
+func getStructDiff(ctx context.Context, a any, b any) (result string) {
+	log := logr.FromContextOrDiscard(ctx)
+
+	// calling cmp.Equal may panic, get ready for it
+	result = "failed to compute the reason for why there is a pending restart"
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error(fmt.Errorf("failed to compute struct difference: %+v", r), "Cannot determine reason for restart")
+		}
+	}()
+
+	var comparator FirstDifferenceReporter
+	eq := cmp.Equal(a, b, cmp.Reporter(&comparator))
+	if eq {
+		log.Error(nil, "Unexpectedly attempted to diff structs that are actually equal")
+	}
+	result = comparator.String()
+
+	return
+}
+
 func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	var imgContainer corev1.Container
@@ -576,12 +658,12 @@ func InjectProxyConfigEnvVars(notebook *nbv1.Notebook) error {
 
 			for key, val := range proxyEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if Proxy spec is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -664,25 +746,25 @@ func CheckAndMountCACertBundle(ctx context.Context, cli client.Client, notebook 
 }
 
 func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
-
-	// ConfigMap details
 	configVolumeName := "trusted-ca"
-	configMapMountPath := "/etc/pki/tls/custom-certs/ca-bundle.crt"
-	configMapMountKey := "ca-bundle.crt"
-	configMapMountValue := "ca-bundle.crt"
+	// RHOAIENG-12325: Mount directory instead of file to enable ConfigMap auto-updates.
+	// Kubernetes does not propagate ConfigMap updates when using subPath mounts.
+	// Environment variables point to the certificate file inside the mounted directory
+	certFilePath := TrustedCACertsMountPath + "/" + TrustedCACertFileName
 	configEnvVars := map[string]string{
-		"PIP_CERT":                  configMapMountPath,
-		"REQUESTS_CA_BUNDLE":        configMapMountPath,
-		"SSL_CERT_FILE":             configMapMountPath,
-		"PIPELINES_SSL_SA_CERTS":    configMapMountPath,
-		"KF_PIPELINES_SSL_SA_CERTS": configMapMountPath,
-		"GIT_SSL_CAINFO":            configMapMountPath,
+		"PIP_CERT":                  certFilePath,
+		"REQUESTS_CA_BUNDLE":        certFilePath,
+		"SSL_CERT_FILE":             certFilePath,
+		"PIPELINES_SSL_SA_CERTS":    certFilePath,
+		"KF_PIPELINES_SSL_SA_CERTS": certFilePath,
+		"GIT_SSL_CAINFO":            certFilePath,
 	}
 
 	notebookContainers := &notebook.Spec.Template.Spec.Containers
 	var imgContainer corev1.Container
 
 	// Add trusted-ca volume
+	// RHOAIENG-12325: Mount entire ConfigMap without Items to enable auto-updates
 	notebookVolumes := &notebook.Spec.Template.Spec.Volumes
 	certVolumeExists := false
 	certVolume := corev1.Volume{
@@ -693,11 +775,7 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 					Name: configMapName,
 				},
 				Optional: ptr.To(true),
-				Items: []corev1.KeyToPath{{
-					Key:  configMapMountKey,
-					Path: configMapMountValue,
-				},
-				},
+				// Items removed - mount all keys to enable automatic updates
 			},
 		},
 	}
@@ -721,12 +799,12 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 
 			for key, val := range configEnvVars {
 				keyExists := false
-				for _, env := range imgContainer.Env {
-					if key == env.Name {
+				for i := range imgContainer.Env {
+					if key == imgContainer.Env[i].Name {
 						keyExists = true
 						// Update if env value is updated
-						if env.Value != val {
-							env.Value = val
+						if imgContainer.Env[i].Value != val {
+							imgContainer.Env[i].Value = val
 						}
 					}
 				}
@@ -742,13 +820,14 @@ func InjectCertConfig(notebook *nbv1.Notebook, configMapName string) error {
 			}
 
 			// Create Volume mount
+			// RHOAIENG-12325: Remove SubPath to enable ConfigMap auto-updates
 			volumeMountExists := false
 			containerVolMounts := &imgContainer.VolumeMounts
 			trustedCAVolMount := corev1.VolumeMount{
 				Name:      configVolumeName,
 				ReadOnly:  true,
-				MountPath: configMapMountPath,
-				SubPath:   configMapMountValue,
+				MountPath: TrustedCACertsMountPath,
+				// SubPath removed - mount directory instead of file to enable auto-updates
 			}
 
 			for index, volumeMount := range *containerVolMounts {
