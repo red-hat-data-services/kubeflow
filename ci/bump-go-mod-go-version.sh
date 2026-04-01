@@ -177,7 +177,7 @@ if [[ "${updated_any}" == "true" ]]; then
     (
       cd "${module_dir}"
       go_cache_root="$(mktemp -d)"
-      trap 'rm -rf "${go_cache_root}"' EXIT
+      trap 'chmod -R u+w "${go_cache_root}" 2>/dev/null; rm -rf "${go_cache_root}"' EXIT
       mkdir -p "${go_cache_root}/gopath" "${go_cache_root}/build-cache"
       export GOPATH="${go_cache_root}/gopath"
       export GOCACHE="${go_cache_root}/build-cache"
