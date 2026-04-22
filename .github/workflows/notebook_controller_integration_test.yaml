@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - stable
       - v1.10-branch
     paths:
       - .github/workflows/notebook_controller_integration_test.yaml
