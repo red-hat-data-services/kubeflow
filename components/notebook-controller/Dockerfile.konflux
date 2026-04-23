@@ -29,7 +29,7 @@ USER root
 RUN  CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -tags strictfipsruntime -a -o ./bin/manager main.go
 
 # Use ubi8/ubi-minimal as base image
-FROM registry.access.redhat.com/ubi8/ubi-minimal@sha256:18dde055f01f35b31122731440263922bc32e62cdd15f1d00764f3fa763464c3
+FROM registry.access.redhat.com/ubi8/ubi-minimal@sha256:46f08923b566497395dda7d4d07bad383b4eedd5a382c3e22e715b169f414331
 
 ## Install additional packages
 RUN microdnf install -y shadow-utils &&\
