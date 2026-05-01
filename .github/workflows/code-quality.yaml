@@ -5,6 +5,7 @@ name: Code static analysis
   pull_request:
     branches:
       - main
+      - stable
       - v1.10-branch
   workflow_dispatch:
 
