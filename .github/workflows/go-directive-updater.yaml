@@ -24,6 +24,7 @@ jobs:
         with:
           check-latest: true
           go-version-file: components/notebook-controller/go.mod
+          cache: false
 
       - name: Update go.mod go directives to latest patch
         id: update-go
