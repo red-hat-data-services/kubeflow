@@ -102,9 +102,12 @@ run-culling: generate fmt vet manifests
 	go run ./main.go
 
 ##@ Build
-.PHONY: docker-build
-docker-build: test ## Build docker image with the manager.
+.PHONY: docker-build-no-test
+docker-build-no-test: ## Build docker image with the manager (without running tests).
 	cd .. && ${CONTAINER_ENGINE} build . --platform="${ARCH}" -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
+
+.PHONY: docker-build
+docker-build: test docker-build-no-test ## Build docker image with the manager.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
