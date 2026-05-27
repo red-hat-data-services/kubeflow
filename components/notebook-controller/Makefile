@@ -102,22 +102,25 @@ run-culling: generate fmt vet manifests
 	go run ./main.go
 
 ##@ Build
+.PHONY: docker-build-no-test
+docker-build-no-test: ## Build docker image with the manager (without running tests).
+	cd .. && "${CONTAINER_ENGINE}" build . --platform="${ARCH}" -t "${IMG}:${TAG}" -f ./notebook-controller/Dockerfile
+
 .PHONY: docker-build
-docker-build: test ## Build docker image with the manager.
-	cd .. && ${CONTAINER_ENGINE} build . --platform="${ARCH}" -t ${IMG}:${TAG} -f ./notebook-controller/Dockerfile
+docker-build: test docker-build-no-test ## Build docker image with the manager.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	${CONTAINER_ENGINE} push ${IMG}:${TAG}
+	"${CONTAINER_ENGINE}" push "${IMG}:${TAG}"
 
 .PHONY: docker-build-multi-arch
 docker-build-multi-arch: ##  Build multi-arch docker images with docker buildx
-	cd .. && docker buildx build --load --platform ${ARCH} --tag ${IMG}:${TAG} -f ./notebook-controller/Dockerfile .
+	cd .. && docker buildx build --load --platform "${ARCH}" --tag "${IMG}:${TAG}" -f ./notebook-controller/Dockerfile .
 
 
 .PHONY: docker-build-push-multi-arch
 docker-build-push-multi-arch: ## Build multi-arch docker images with docker buildx and push to docker registry
-	cd .. && docker buildx build --platform ${ARCH} --tag ${IMG}:${TAG} --push -f ./notebook-controller/Dockerfile .
+	cd .. && docker buildx build --platform "${ARCH}" --tag "${IMG}:${TAG}" --push -f ./notebook-controller/Dockerfile .
 
 
 .PHONY: image
