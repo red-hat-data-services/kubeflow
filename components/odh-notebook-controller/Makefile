@@ -128,14 +128,14 @@ run: manifests generate fmt vet certificates ktunnel ## Run a controller from yo
 
 .PHONY: docker-build-no-test
 docker-build-no-test: ## Build docker image with the manager (without running tests).
-	cd ../ && ${CONTAINER_ENGINE} build . --platform="${ARCH}" -t ${IMG}:${TAG} -f odh-notebook-controller/Dockerfile
+	cd ../ && "${CONTAINER_ENGINE}" build . --platform="${ARCH}" -t "${IMG}:${TAG}" -f odh-notebook-controller/Dockerfile
 
 .PHONY: docker-build
 docker-build: test docker-build-no-test ## Build docker image with the manager.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	${CONTAINER_ENGINE} push ${IMG}:${TAG}
+	"${CONTAINER_ENGINE}" push "${IMG}:${TAG}"
 
 .PHONY: image
 image: docker-build docker-push ## Build and push docker image with the manager.
