@@ -61,7 +61,7 @@ jobs:
       - name: Build Notebook Controller Image
         run: |
           cd components/notebook-controller
-          make docker-build
+          make docker-build-no-test
         env:
           IMG: notebook-controller
           CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/notebook-controller/build-cache
@@ -69,7 +69,7 @@ jobs:
       - name: Build ODH Notebook Controller Image
         run: |
           cd components/odh-notebook-controller
-          make docker-build
+          make docker-build-no-test
         env:
           IMG: odh-notebook-controller
           CACHE_IMAGE: ghcr.io/${{ github.repository }}/components/odh-notebook-controller/build-cache
