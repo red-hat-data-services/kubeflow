@@ -58,7 +58,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           args: --timeout=5m
-          version: v2.8.0
+          version: v2.12.2
           only-new-issues: true
           working-directory: ${{ matrix.component }}
 
