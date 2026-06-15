@@ -47,6 +47,32 @@ make e2e-test -e K8S_NAMESPACE=<namespace>
 
 Pass `E2E_TEST_FLAGS="--skip-deletion=true"` to skip notebook deletion tests.
 
+## Chaos Validation (operator-chaos)
+
+This repo integrates [operator-chaos](https://github.com/opendatahub-io/operator-chaos)
+for shift-left upgrade validation (**Level 1 + L2 elements**).
+
+A repo-local knowledge model at `chaos/knowledge/workbenches.yaml` describes
+the operator topology (Deployments, ServiceAccounts, webhooks, steady-state
+checks). A GitHub Actions workflow (`.github/workflows/operator_chaos_validation.yaml`)
+runs on PRs that touch API types, controllers, CRDs, or the knowledge model and:
+
+- validates the knowledge model (`validate --knowledge`, `preflight --local`)
+- diffs the knowledge model between base and PR branches (`diff --breaking`)
+- diffs the Notebook CRD schema between base and PR branches (`diff-crds`)
+- previews upgrade experiments (`simulate-upgrade --dry-run`)
+
+### Local validation
+```sh
+cd components/odh-notebook-controller
+make chaos-validate   # validates knowledge model + preflight
+```
+
+### Maintenance
+
+When CRDs, webhooks, or managed resources change, update
+`chaos/knowledge/workbenches.yaml` in the same PR.
+
 ## Debug
 
 ### Run locally with webhook tunnel
