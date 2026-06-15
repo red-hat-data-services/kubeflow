@@ -103,6 +103,11 @@ govulncheck: ## Run govulncheck against code. Uses the Go version specified in g
 		GOVERSION=go$(GO_VERSION) go run golang.org/x/vuln/cmd/govulncheck@latest -show=verbose ./...; \
 	fi
 
+.PHONY: chaos-validate
+chaos-validate: operator-chaos ## Validate chaos knowledge model and run preflight checks.
+	$(OPERATOR_CHAOS) validate --knowledge ../../chaos/knowledge/workbenches.yaml
+	$(OPERATOR_CHAOS) preflight --knowledge ../../chaos/knowledge/workbenches.yaml --local
+
 .PHONY: test test-with-rbac-false test-with-rbac-true
 test: test-with-rbac-false test-with-rbac-true
 test-with-rbac-false: manifests generate fmt vet envtest ## Run tests.
@@ -227,6 +232,12 @@ ENVTEST_VERSION?=v0.0.0-20250723164028-948d554cd9c7
 .PHONY: envtest
 envtest: ## Download setup-envtest locally if necessary - https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest#section-readme
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+OPERATOR_CHAOS ?= $(LOCALBIN)/operator-chaos
+.PHONY: operator-chaos
+operator-chaos: $(OPERATOR_CHAOS) ## Download operator-chaos locally if necessary.
+$(OPERATOR_CHAOS): $(LOCALBIN)
+	test -s $(OPERATOR_CHAOS) || GOBIN=$(LOCALBIN) go install github.com/opendatahub-io/operator-chaos/cmd/operator-chaos@latest
 
 KTUNNEL = $(LOCALBIN)/ktunnel
 .PHONY: ktunnel
