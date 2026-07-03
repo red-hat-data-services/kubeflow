@@ -202,7 +202,7 @@ func InjectKubeRbacProxy(notebook *nbv1.Notebook, kubeRbacProxyConfig KubeRbacPr
 			"--secure-listen-address=0.0.0.0:" + strconv.Itoa(NotebookKubeRbacProxyPort),
 			"--upstream=http://127.0.0.1:" + strconv.Itoa(NotebookPort) + "/",
 			"--logtostderr=true",
-			"--v=10", // TODO - TBD, this is too verbose
+			"--v=0",
 			"--proxy-endpoints-port=" + strconv.Itoa(NotebookKubeRbacProxyHealthPort),
 			"--config-file=" + KubeRbacProxyConfigFilePath,
 			"--tls-cert-file=" + KubeRbacProxyTLSCertFilePath,
