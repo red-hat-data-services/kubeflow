@@ -28,39 +28,37 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-//+kubebuilder:webhook:path=/validate-notebook-v1,mutating=false,failurePolicy=fail,sideEffects=None,groups=kubeflow.org,resources=notebooks,verbs=update,versions=v1,name=notebooks-validation.opendatahub.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/validate-notebook-v1,mutating=false,failurePolicy=fail,sideEffects=None,groups=kubeflow.org,resources=notebooks,verbs=create;update,versions=v1,name=notebooks-validation.opendatahub.io,admissionReviewVersions=v1
 
-// NotebookValidatingWebhook validates Notebook updates
+// NotebookValidatingWebhook validates Notebook create and update requests.
 type NotebookValidatingWebhook struct {
 	Log     logr.Logger
 	Client  client.Client
 	Decoder admission.Decoder
 }
 
-// Handle validates Notebook updates
+// Handle validates Notebook create and update requests.
 func (v *NotebookValidatingWebhook) Handle(ctx context.Context, req admission.Request) admission.Response {
 	log := v.Log.WithValues("notebook", req.Name, "namespace", req.Namespace)
 
-	// Only validate updates
-	if req.Operation != admissionv1.Update {
-		return admission.Allowed("")
-	}
-
-	// Decode the new notebook
 	newNotebook := &nbv1.Notebook{}
 	if err := v.Decoder.Decode(req, newNotebook); err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	// Decode the old notebook
-	oldNotebook := &nbv1.Notebook{}
-	if err := v.Decoder.DecodeRaw(req.OldObject, oldNotebook); err != nil {
-		return admission.Errored(http.StatusBadRequest, err)
+	if err := validatePodSpecSecurity(&newNotebook.Spec.Template.Spec, newNotebook.Name); err != nil {
+		return admission.Denied(err.Error())
 	}
 
-	// Check if MLflow annotation is being removed
-	if err := v.validateMLflowAnnotationRemoval(oldNotebook, newNotebook, log); err != nil {
-		return admission.Denied(err.Error())
+	if req.Operation == admissionv1.Update {
+		oldNotebook := &nbv1.Notebook{}
+		if err := v.Decoder.DecodeRaw(req.OldObject, oldNotebook); err != nil {
+			return admission.Errored(http.StatusBadRequest, err)
+		}
+
+		if err := v.validateMLflowAnnotationRemoval(oldNotebook, newNotebook, log); err != nil {
+			return admission.Denied(err.Error())
+		}
 	}
 
 	return admission.Allowed("")
