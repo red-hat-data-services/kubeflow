@@ -172,6 +172,15 @@ func main() {
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
 
+	notebookValidatingWebhook := &webhook.Admission{
+		Handler: &controllers.NotebookValidatingWebhook{
+			Log:     ctrl.Log.WithName("controllers").WithName("odh-notebook-validating-webhook"),
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(mgr.GetScheme()),
+		},
+	}
+	hookServer.Register("/validate-notebook-v1", notebookValidatingWebhook)
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
