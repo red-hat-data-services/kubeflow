@@ -21,9 +21,9 @@ jobs:
           - components/odh-notebook-controller
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           check-latest: true
           go-version-file: ${{ matrix.component }}/go.mod
