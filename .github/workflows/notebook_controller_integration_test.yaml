@@ -22,10 +22,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
-      - name: Verify podman
+      - name: Ensure compatible container runtime
         run: |
+          # Podman 5.x generates OCI runtime specs that crun 1.14.1 (shipped with
+          # Ubuntu 24.04) cannot handle, causing "unknown version specified" errors.
+          # Switch to runc which supports the newer spec versions. This only affects
+          # how RUN steps execute during image build — the output image is identical.
+          mkdir -p ~/.config/containers
+          printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
           podman version
-          podman info --format '{{.Host.OCIRuntime.Name}} {{.Host.OCIRuntime.Version}}'
+          runtime=$(podman info --format '{{.Host.OCIRuntime.Name}}')
+          echo "OCI runtime: $runtime ($(podman info --format '{{.Host.OCIRuntime.Version}}'))"
+          if [[ "$runtime" != "runc" ]]; then
+            echo "::error::Expected podman to use runc, got: $runtime"
+            exit 1
+          fi
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
