@@ -72,7 +72,7 @@ jobs:
           echo "Version format validated: $NEW_VERSION"
 
       - name: Checkout release branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.RELEASE_BRANCH }}
           fetch-depth: 0
