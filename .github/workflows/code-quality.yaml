@@ -18,14 +18,14 @@ jobs:
     name: pre-commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: actions/setup-go@v7
         with:
           check-latest: true
           go-version-file: components/notebook-controller/go.mod
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
@@ -45,7 +45,7 @@ jobs:
           - components/odh-notebook-controller
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - uses: actions/setup-go@v7
         with:
@@ -73,7 +73,7 @@ jobs:
   check-generated-code:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Rerun all code generators we have
         run: bash ci/generate_code.sh
@@ -93,7 +93,7 @@ jobs:
   code-static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # This simply checks that the manifests and respective kustomization.yaml finishes without an error.
       - name: Check kustomize manifest
