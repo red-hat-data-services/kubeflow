@@ -225,6 +225,15 @@ var _ = BeforeSuite(func() {
 	}
 	hookServer.Register("/mutate-notebook-v1", notebookWebhook)
 
+	notebookValidatingWebhook := &webhook.Admission{
+		Handler: &NotebookValidatingWebhook{
+			Log:     ctrl.Log.WithName("controllers").WithName("odh-notebook-validating-webhook"),
+			Client:  mgr.GetClient(),
+			Decoder: admission.NewDecoder(mgr.GetScheme()),
+		},
+	}
+	hookServer.Register("/validate-notebook-v1", notebookValidatingWebhook)
+
 	// Start the manager
 	go func() {
 		defer GinkgoRecover()
