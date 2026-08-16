@@ -22,27 +22,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
-      - name: Install podman
+      - name: Ensure compatible container runtime
         run: |
-          sudo mkdir -p /etc/apt/keyrings
-          curl -fsSL https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/Release.key \
-            | gpg --dearmor \
-            | sudo tee /etc/apt/keyrings/devel_kubic_libcontainers_unstable.gpg > /dev/null
-          echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/devel_kubic_libcontainers_unstable.gpg]\
-              https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_$(lsb_release -rs)/ /" \
-            | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:unstable.list > /dev/null
-          sudo apt-get update -qq
-          sudo apt-get -qq -y install podman
+          # Podman 5.x generates OCI runtime specs that crun 1.14.1 (shipped with
+          # Ubuntu 24.04) cannot handle, causing "unknown version specified" errors.
+          # Switch to runc which supports the newer spec versions. This only affects
+          # how RUN steps execute during image build — the output image is identical.
+          mkdir -p ~/.config/containers
+          printf '[engine]\nruntime = "runc"\n' > ~/.config/containers/containers.conf
           podman version
-
-          # temporary fix for https://github.com/containers/podman/issues/21024
-          wget https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_22.04/amd64/conmon_2.1.2~0_amd64.deb -O /tmp/conmon_2.1.2.deb
-          sudo apt install /tmp/conmon_2.1.2.deb
-
-          # Starting systemd user service
-          systemctl --user daemon-reload
-          systemctl --user start podman.socket
+          runtime=$(podman info --format '{{.Host.OCIRuntime.Name}}')
+          echo "OCI runtime: $runtime ($(podman info --format '{{.Host.OCIRuntime.Version}}'))"
+          if [[ "$runtime" != "runc" ]]; then
+            echo "::error::Expected podman to use runc, got: $runtime"
+            exit 1
+          fi
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
