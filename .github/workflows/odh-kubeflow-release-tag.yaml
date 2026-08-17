@@ -9,6 +9,8 @@ on:
       - ".tekton/odh-notebook-controller-push.yaml"
       - ".tekton/odh-kf-notebook-controller-push.yaml"
 
+permissions: {}
+
 env:
   REPO_ORG: opendatahub-io
   REPO_NAME: kubeflow

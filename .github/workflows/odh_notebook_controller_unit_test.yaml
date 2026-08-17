@@ -11,9 +11,13 @@ on:
       - components/odh-notebook-controller/**
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
     - name: Checkout
       uses: actions/checkout@v7.0.1

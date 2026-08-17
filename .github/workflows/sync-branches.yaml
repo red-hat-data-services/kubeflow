@@ -21,6 +21,9 @@ on:
         description: "To:"
         required: true
         type: string
+
+permissions: {}
+
 env:
   SOURCE_BRANCH: ${{ inputs.source }}
   TARGET_BRANCH: ${{ inputs.target }}
@@ -28,6 +31,8 @@ env:
 jobs:
   sync-branches:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Set up Git

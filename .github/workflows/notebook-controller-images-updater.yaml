@@ -35,6 +35,8 @@ on:
         required: true
         type: string
 
+permissions: {}
+
 env:
   REPO_OWNER: ${{ inputs.organization }}
   TEMP_UPDATER_BRANCH: temp-${{ inputs.branch-name }}-${{ github.run_id }}
