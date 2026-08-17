@@ -11,6 +11,8 @@ on:
       - components/notebook-controller/**
   workflow_dispatch:
 
+permissions: {}
+
 env:
   IMG: notebook-controller
   TAG: integration-test
@@ -18,6 +20,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
