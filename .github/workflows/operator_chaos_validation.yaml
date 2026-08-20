@@ -23,6 +23,8 @@ name: Operator Chaos Validation
         required: false
         default: main
 
+permissions: {}
+
 jobs:
   operator-chaos:
     name: operator-chaos shift-left validation
