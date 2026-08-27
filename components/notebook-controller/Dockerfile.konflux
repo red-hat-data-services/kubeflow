@@ -2,7 +2,7 @@
 ARG SOURCE_CODE=.
 
 # Use ubi9/go-toolset as base image
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26@sha256:71e89a1a51ab32cc30634d89ee4dc8ea40ad9991057fa1eae3b1af32bc7db73f as builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26@sha256:1a755651ffe1a438f137418d183f18ebad527ec929206c17804f93490a97869e as builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -29,7 +29,7 @@ USER root
 RUN  CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} GOEXPERIMENT=strictfipsruntime go build -tags strictfipsruntime -a -o ./bin/manager main.go
 
 # Use ubi9/ubi-minimal as base image
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:580752f96d36c4132bffd30f9c34865bf4bd87f6aa161c969d117f21732e50f7
 
 ## Create a non-root user with UID 1001
 RUN useradd --uid 1001 --create-home --user-group --system rhods
