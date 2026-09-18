@@ -2,6 +2,10 @@
 name: Code static analysis
 "on":
   push:
+    branches:
+      - main
+      - stable
+      - v1.10-branch
   pull_request:
     branches:
       - main
@@ -59,7 +63,8 @@ jobs:
         with:
           args: --timeout=5m
           version: v2.12.2
-          only-new-issues: true
+          # PR: lint only the diff. Push: full lint (no compare against a missing before SHA).
+          only-new-issues: ${{ github.event_name == 'pull_request' }}
           working-directory: ${{ matrix.component }}
 
       # additional checks not part of golangci-lint
