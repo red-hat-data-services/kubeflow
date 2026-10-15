@@ -119,6 +119,37 @@ field that holds the standard Kubernetes `corev1.PodSpec` (see
 container definitions is therefore `spec.template.spec.containers[]`, as shown
 in the YAML example above.
 
+### Notebook ingress configuration
+
+The controller accepts an operator-projected `odh-notebook-controller-config`
+in the controller namespace.
+Its `ingresses` data key is a JSON list consumed by the shared ingress assignment
+resolver, including the default entry and explicit Gateway references:
+
+```yaml
+data:
+  ingresses: >-
+    [{"name":"primary","gatewayName":"data-science-gateway","gatewayNamespace":"openshift-ingress","isDefault":true},
+     {"name":"team","gatewayName":"team-gateway","gatewayNamespace":"team-ingress"}]
+```
+
+The Namespace annotation `opendatahub.io/ingress-name` selects an entry by name.
+An absent annotation selects the entry with `isDefault: true`. Gateway names and
+namespaces are forwarded as supplied, without adding a listener section.
+
+When no entry has `isDefault: true`, the controller adds the Gateway configured
+by `NOTEBOOK_GATEWAY_NAME` and `NOTEBOOK_GATEWAY_NAMESPACE`. Unset variables
+fall back to `data-science-gateway` and `openshift-ingress`, respectively.
+This also applies to a missing ConfigMap, a missing key, or an empty list.
+The fallback entry is named `default`; duplicate names or Gateway references
+remain invalid configuration rather than changing a supplied entry's role.
+
+Unknown annotations still remove stale routes. Invalid JSON or invalid entries
+return an error and retain the existing route.
+The controller reads the ConfigMap once before reconciling active Notebook
+resources, directly from the API; Namespace annotation and ConfigMap events
+requeue Notebooks. Deletion cleanup does not require the configuration.
+
 ## Request Flow
 
 ```text
@@ -237,9 +268,14 @@ Pipelines-as-Code:
 | `odh-notebook-controller-pull-request.yaml` | Build `odh-notebook-controller` image on PRs |
 | `odh-kf-notebook-controller-pull-request.yaml` | Build `kubeflow-notebook-controller` image on PRs |
 | `kubeflow-group-test.yaml` | Group integration/e2e test (triggered via `/group-test` comment) |
+| `early-gate-ci-build.yaml` | Early-gate operator/bundle/FBC build (`/early-gate-build`) |
+| `early-gate-ci-test.yaml` | Early-gate smoke tests (`/early-gate-test`) |
 
-Build pipelines run automatically when files under `components/` or `.tekton/`
-change. PR-built images expire after 7 days. The group test pipeline references
+PR image builds run when that image's sources change (`odh-notebook-controller`
+plus `notebook-controller` for the ODH image; `notebook-controller` plus
+`common` for the Kubeflow image). A successful PR image build posts
+`/early-gate-build`; a successful FBC build then posts `/early-gate-test`.
+PR-built images expire after 7 days. The group test pipeline references
 a central test pipeline in `odh-konflux-central` and can run for up to 10 hours.
 
 ## Deployment
