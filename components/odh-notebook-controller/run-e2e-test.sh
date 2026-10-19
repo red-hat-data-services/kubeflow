@@ -5,6 +5,25 @@ set -Eeuxo pipefail
 
 echo "Running the ${0} setup"
 
+# `oc new-project` records the new project as the current context. A local
+# kubeconfig is updated in place. When that file is read-only (a CI Secret
+# mount, or a local file the user cannot write), run against a copy so the
+# context update still succeeds. KUBECONFIG may list several files; oc writes
+# the first one and still reads the rest.
+writable_kubeconfig=""
+kubeconfig_spec="${KUBECONFIG:-${HOME}/.kube/config}"
+kubeconfig_primary="${kubeconfig_spec%%:*}"
+if [[ -e "${kubeconfig_primary}" && ! -w "${kubeconfig_primary}" ]]; then
+    writable_kubeconfig="$(mktemp)"
+    cp "${kubeconfig_primary}" "${writable_kubeconfig}"
+    chmod 600 "${writable_kubeconfig}"
+    if [[ "${kubeconfig_spec}" == *:* ]]; then
+        export KUBECONFIG="${writable_kubeconfig}:${kubeconfig_spec#*:}"
+    else
+        export KUBECONFIG="${writable_kubeconfig}"
+    fi
+fi
+
 TEST_NAMESPACE="odh-notebook-controller-system"
 
 # Following variables are optional - if not set, the default values in relevant params.env
@@ -42,6 +61,9 @@ function cleanup() {
         echo "Warning [cleanup]: project deletion failed!"
         ret_code=1
     }
+    if [[ -n "${writable_kubeconfig}" ]]; then
+        rm -f "${writable_kubeconfig}"
+    fi
     return ${ret_code}
 }
 trap cleanup EXIT
