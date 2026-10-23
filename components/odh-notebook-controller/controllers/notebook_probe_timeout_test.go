@@ -29,7 +29,10 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const probeTimeoutHealthPath = "/healthz"
+const (
+	probeTimeoutHealthPath = "/healthz"
+	falseString            = "false"
+)
 
 func newProbeTimeoutNotebook(name string, annotations map[string]string) *nbv1.Notebook {
 	return &nbv1.Notebook{
@@ -127,7 +130,7 @@ var _ = Describe("workbench probe timeout admission", func() {
 		}
 		Expect(cli.Create(ctx, settings)).To(Succeed())
 
-		for index, injectAuth := range []string{"false", trueString} {
+		for index, injectAuth := range []string{falseString, trueString} {
 			By(fmt.Sprintf("Admitting a differently named container with proxy injection %s", injectAuth))
 			notebook := newProbeTimeoutNotebook(fmt.Sprintf("mismatched-probe-timeout-%d", index), map[string]string{AnnotationInjectAuth: injectAuth})
 			notebook.Spec.Template.Spec.Containers[0].Name = "custom-workbench"
