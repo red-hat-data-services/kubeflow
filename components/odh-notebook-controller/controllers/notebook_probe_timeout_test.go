@@ -120,6 +120,47 @@ var _ = Describe("workbench probe timeout admission", func() {
 		Expect(updatedNotebook.Spec.Template.Spec.Containers[0].ReadinessProbe.TimeoutSeconds).To(Equal(int32(9)))
 	})
 
+	It("admits creates and updates when the container name differs from the Notebook name", func() {
+		settings = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: notebookControllerSettingsConfigMap, Namespace: odhNotebookControllerTestNamespace},
+			Data:       map[string]string{workbenchProbeTimeoutKey: "5"},
+		}
+		Expect(cli.Create(ctx, settings)).To(Succeed())
+
+		for index, injectAuth := range []string{"false", trueString} {
+			By(fmt.Sprintf("Admitting a differently named container with proxy injection %s", injectAuth))
+			notebook := newProbeTimeoutNotebook(fmt.Sprintf("mismatched-probe-timeout-%d", index), map[string]string{AnnotationInjectAuth: injectAuth})
+			notebook.Spec.Template.Spec.Containers[0].Name = "custom-workbench"
+			originalContainers := notebook.DeepCopy().Spec.Template.Spec.Containers
+			Expect(cli.Create(ctx, notebook)).To(Succeed())
+			createdNotebooks = append(createdNotebooks, notebook)
+			Expect(cli.Get(ctx, types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}, notebook)).To(Succeed())
+			Expect(notebook.Spec.Template.Spec.Containers[:2]).To(Equal(originalContainers))
+
+			Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if err := cli.Get(ctx, types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}, notebook); err != nil {
+					return err
+				}
+				if notebook.Labels == nil {
+					notebook.Labels = make(map[string]string)
+				}
+				notebook.Labels["probe-timeout-test"] = "updated"
+				return cli.Update(ctx, notebook)
+			})).To(Succeed())
+			Expect(cli.Get(ctx, types.NamespacedName{Name: notebook.Name, Namespace: notebook.Namespace}, notebook)).To(Succeed())
+			containers := notebook.Spec.Template.Spec.Containers
+			Expect(containers[:2]).To(Equal(originalContainers))
+			if injectAuth == trueString {
+				Expect(containers).To(HaveLen(3))
+				Expect(containers[2].Name).To(Equal(ContainerNameKubeRbacProxy))
+				Expect(containers[2].LivenessProbe.TimeoutSeconds).To(Equal(int32(5)))
+				Expect(containers[2].ReadinessProbe.TimeoutSeconds).To(Equal(int32(5)))
+			} else {
+				Expect(containers).To(HaveLen(2))
+			}
+		}
+	})
+
 	It("preserves existing probe timeouts when the setting is absent", func() {
 		notebook := newProbeTimeoutNotebook("unconfigured-probe-timeout", map[string]string{AnnotationInjectAuth: trueString})
 		Expect(cli.Create(ctx, notebook)).To(Succeed())

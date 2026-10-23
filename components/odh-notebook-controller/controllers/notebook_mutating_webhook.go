@@ -476,15 +476,9 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	if configured {
-		err = applyProbeTimeout(notebook, notebook.Name, probeTimeout)
-		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
-		}
+		applyProbeTimeout(notebook, notebook.Name, probeTimeout, log)
 		if KubeRbacProxyInjectionIsEnabled(notebook.ObjectMeta) {
-			err = applyProbeTimeout(notebook, ContainerNameKubeRbacProxy, probeTimeout)
-			if err != nil {
-				return admission.Errored(http.StatusInternalServerError, err)
-			}
+			applyProbeTimeout(notebook, ContainerNameKubeRbacProxy, probeTimeout, log)
 		}
 	}
 

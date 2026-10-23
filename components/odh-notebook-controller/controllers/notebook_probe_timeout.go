@@ -68,7 +68,7 @@ func readWorkbenchProbeTimeout(ctx context.Context, reader client.Reader, log lo
 	return int32(parsed), true, nil
 }
 
-func applyProbeTimeout(notebook *nbv1.Notebook, containerName string, timeout int32) error {
+func applyProbeTimeout(notebook *nbv1.Notebook, containerName string, timeout int32, log logr.Logger) {
 	for i := range notebook.Spec.Template.Spec.Containers {
 		container := &notebook.Spec.Template.Spec.Containers[i]
 		if container.Name != containerName {
@@ -80,8 +80,8 @@ func applyProbeTimeout(notebook *nbv1.Notebook, containerName string, timeout in
 		if container.ReadinessProbe != nil {
 			container.ReadinessProbe.TimeoutSeconds = timeout
 		}
-		return nil
+		return
 	}
 
-	return fmt.Errorf("container %q not found in Notebook %s/%s while applying %s", containerName, notebook.Namespace, notebook.Name, workbenchProbeTimeoutKey)
+	log.Info("Skipping probe timeout: target container not found", "container", containerName, "notebook", notebook.Name, "namespace", notebook.Namespace)
 }
