@@ -1,6 +1,6 @@
 module github.com/opendatahub-io/kubeflow/components/odh-notebook-controller
 
-go 1.26.7
+go 1.26.10
 
 require (
 	github.com/go-logr/logr v1.4.4
@@ -33,7 +33,10 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 )
 
-require github.com/openshift/controller-runtime-common v0.0.0-20261005093240-b39eb7218441
+require (
+	github.com/openshift/controller-runtime-common v0.0.0-20261005093240-b39eb7218441
+	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
+)
 
 require (
 	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.1-0.20261015150943-4c8b32508ccc
@@ -79,7 +82,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
-	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.24.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
