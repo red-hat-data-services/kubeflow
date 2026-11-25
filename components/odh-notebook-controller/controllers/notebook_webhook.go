@@ -431,6 +431,12 @@ func (w *NotebookWebhook) Handle(ctx context.Context, req admission.Request) adm
 
 		// // Mount Secret ds-pipeline-config
 		if strings.ToLower(strings.TrimSpace(os.Getenv("SET_PIPELINE_SECRET"))) == "true" {
+			// Grant the manager ServiceAccount Secret access before reading it
+			err = EnsureManagerSecretAccess(ctx, w.Client, notebook, w.Namespace, log)
+			if err != nil {
+				log.Error(err, "Unable to ensure manager Secret access")
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
 			// Mount Secret ds-pipeline-config
 			err = MountElyraRuntimeConfigSecret(ctx, w.Client, notebook, log)
 			if err != nil {

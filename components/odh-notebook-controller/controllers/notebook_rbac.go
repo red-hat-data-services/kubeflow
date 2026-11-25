@@ -19,13 +19,115 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	nbv1 "github.com/kubeflow/kubeflow/components/notebook-controller/api/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// The manager ServiceAccount name as deployed (kustomize namePrefix
+// "odh-notebook-controller-" + "manager").
+const managerSAName = "odh-notebook-controller-manager"
+
+// managerSecretAccessName is the namespaced Role/RoleBinding that grants the
+// controller's ServiceAccount Secret access inside a Notebook's namespace.
+// The manager ClusterRole no longer carries cluster-wide Secret permissions,
+// so this binding must exist before any Secret is read or written there.
+const managerSecretAccessName = "odh-notebook-controller-secret-access"
+
+func notebookOwnerReference(notebook *nbv1.Notebook) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: "kubeflow.org/v1",
+		Kind:       "Notebook",
+		Name:       notebook.Name,
+		UID:        notebook.UID,
+		Controller: ptr.To(true),
+	}
+}
+
+// managerSecretAccessRole defines the namespaced Role granting the manager
+// ServiceAccount only the Secret verbs the controller uses.
+func managerSecretAccessRole(notebook *nbv1.Notebook) *rbacv1.Role {
+	return &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            managerSecretAccessName,
+			Namespace:       notebook.Namespace,
+			OwnerReferences: []metav1.OwnerReference{notebookOwnerReference(notebook)},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get", "create", "update", "patch"},
+			},
+		},
+	}
+}
+
+// managerSecretAccessRoleBinding binds that Role to the manager ServiceAccount.
+func managerSecretAccessRoleBinding(notebook *nbv1.Notebook, managerNamespace string) *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            managerSecretAccessName,
+			Namespace:       notebook.Namespace,
+			OwnerReferences: []metav1.OwnerReference{notebookOwnerReference(notebook)},
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      managerSAName,
+				Namespace: managerNamespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			Kind:     "Role",
+			Name:     managerSecretAccessName,
+			APIGroup: "rbac.authorization.k8s.io",
+		},
+	}
+}
+
+// createOrUpdate applies desired over the found object when they differ.
+func createOrUpdate(ctx context.Context, cli client.Client, desired, found client.Object) error {
+	err := cli.Get(ctx, types.NamespacedName{Name: desired.GetName(), Namespace: desired.GetNamespace()}, found)
+	if err != nil && apierrs.IsNotFound(err) {
+		return cli.Create(ctx, desired)
+	} else if err != nil {
+		return err
+	}
+	desired.SetResourceVersion(found.GetResourceVersion())
+	if reflect.DeepEqual(desired, found) {
+		return nil
+	}
+	return cli.Update(ctx, desired)
+}
+
+// EnsureManagerSecretAccess creates the namespaced Role and RoleBinding that
+// grant the manager ServiceAccount Secret access in the Notebook's namespace.
+// Both are garbage-collected with the Notebook. It must run before the
+// reconciler or webhook reads or writes any Secret there.
+func EnsureManagerSecretAccess(ctx context.Context, cli client.Client, notebook *nbv1.Notebook, managerNamespace string, log logr.Logger) error {
+	// During webhook handling of a new Notebook the UID is not assigned yet,
+	// so no ownerReference can be set; the reconciler creates the objects
+	// instead once the Notebook is stored.
+	if notebook.UID == "" {
+		return nil
+	}
+	if err := createOrUpdate(ctx, cli, managerSecretAccessRole(notebook), &rbacv1.Role{}); err != nil {
+		log.Error(err, "Failed to ensure manager Secret access Role", "Role.Namespace", notebook.Namespace, "Role.Name", managerSecretAccessName)
+		return err
+	}
+	if err := createOrUpdate(ctx, cli, managerSecretAccessRoleBinding(notebook, managerNamespace), &rbacv1.RoleBinding{}); err != nil {
+		log.Error(err, "Failed to ensure manager Secret access RoleBinding", "RoleBinding.Namespace", notebook.Namespace, "RoleBinding.Name", managerSecretAccessName)
+		return err
+	}
+	return nil
+}
 
 // NewRoleBinding defines the desired RoleBinding or ClusterRoleBinding object.
 // Parameters:

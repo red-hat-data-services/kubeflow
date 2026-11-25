@@ -231,6 +231,45 @@ var _ = Describe("The Openshift Notebook controller", func() {
 
 	})
 
+	// New test case for manager secret access
+	When("Creating a Notebook, manager Secret access is granted", func() {
+		const (
+			Name      = "secret-rbac-notebook"
+			Namespace = "default"
+		)
+
+		notebook := createNotebook(Name, Namespace)
+
+		It("Should create the namespaced Role and RoleBinding granting Secret access", func() {
+			By("By creating a new Notebook")
+			Expect(cli.Create(ctx, notebook)).Should(Succeed())
+
+			By("By checking that the Secret access Role is created")
+			role := &rbacv1.Role{}
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: managerSecretAccessName, Namespace: Namespace}, role)
+			}, duration, interval).Should(Succeed())
+
+			Expect(role.Rules).To(Equal([]rbacv1.PolicyRule{{
+				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get", "create", "update", "patch"},
+			}}))
+
+			By("By checking that the Secret access RoleBinding is created")
+			roleBinding := &rbacv1.RoleBinding{}
+			Eventually(func() error {
+				return cli.Get(ctx, types.NamespacedName{Name: managerSecretAccessName, Namespace: Namespace}, roleBinding)
+			}, duration, interval).Should(Succeed())
+
+			Expect(roleBinding.RoleRef.Kind).To(Equal("Role"))
+			Expect(roleBinding.RoleRef.Name).To(Equal(managerSecretAccessName))
+			Expect(roleBinding.Subjects).To(HaveLen(1))
+			Expect(roleBinding.Subjects[0].Kind).To(Equal("ServiceAccount"))
+			Expect(roleBinding.Subjects[0].Name).To(Equal(managerSAName))
+		})
+	})
+
 	// New test case for notebook creation
 	When("Creating a Notebook, test certificate is mounted", func() {
 		const (

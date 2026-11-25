@@ -85,7 +85,7 @@ type OpenshiftNotebookReconciler struct {
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/status,verbs=get
 // +kubebuilder:rbac:groups=kubeflow.org,resources=notebooks/finalizers,verbs=update;patch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=services;serviceaccounts;secrets;configmaps,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=services;serviceaccounts;configmaps,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=proxies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies/finalizers,verbs=update;patch
@@ -188,6 +188,12 @@ func (r *OpenshiftNotebookReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Handle notebook deletion with finalizer cleanup
 	if notebook.DeletionTimestamp != nil {
 		return r.handleNotebookDeletion(notebook, ctx)
+	}
+
+	// Grant the manager ServiceAccount Secret access in this Notebook's
+	// namespace (the ClusterRole no longer carries cluster-wide Secret perms)
+	if err := EnsureManagerSecretAccess(ctx, r.Client, notebook, r.Namespace, r.Log); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Create Configmap with the ODH notebook certificate
